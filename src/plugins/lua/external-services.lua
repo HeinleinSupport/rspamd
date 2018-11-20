@@ -73,45 +73,45 @@ end
 
 local default_message = '${SCANNER}: virus found: "${VIRUS}"'
 
-local function match_patterns(default_sym, found, patterns)
-  if type(patterns) ~= 'table' then return default_sym end
+local function match_patterns(default_sym, found, patterns,score)
+  if type(patterns) ~= 'table' then return default_sym,score end
   if not patterns[1] then
     for sym, pat in pairs(patterns) do
       if pat:match(found) then
-        return sym
+        return sym, '1'
       end
     end
-    return default_sym
+    return default_sym,score
   else
     for _, p in ipairs(patterns) do
       for sym, pat in pairs(p) do
         if pat:match(found) then
-          return sym
+          return sym, '1'
         end
       end
     end
-    return default_sym
+    return default_sym,score
   end
 end
 
 local function yield_result(task, rule, vname, score)
   local all_whitelisted = true
   if type(vname) == 'string' then
-    local symname = match_patterns(rule['symbol'], vname, rule['patterns'])
+    local symname,symscore = match_patterns(rule['symbol'], vname, rule['patterns'],score)
     if rule['whitelist'] and rule['whitelist']:get_key(vname) then
       rspamd_logger.infox(task, '%s: "%s" is in whitelist', rule['type'], vname)
       return
     end
-    task:insert_result(symname, score, vname)
+    task:insert_result(symname, symscore, vname)
     rspamd_logger.infox(task, '%s: %s found: "%s"', rule['type'], rule['detection_category'], vname)
   elseif type(vname) == 'table' then
     for _, vn in ipairs(vname) do
-      local symname = match_patterns(rule['symbol'], vn, rule['patterns'])
+      local symname,symscore = match_patterns(rule['symbol'], vn, rule['patterns'],score)
       if rule['whitelist'] and rule['whitelist']:get_key(vn) then
         rspamd_logger.infox(task, '%s: "%s" is in whitelist', rule['type'], vn)
       else
         all_whitelisted = false
-        task:insert_result(symname, score, vn)
+        task:insert_result(symname, symscore, vn)
         rspamd_logger.infox(task, '%s: %s found: "%s"', rule['type'], rule['detection_category'], vn)
       end
     end
@@ -1418,7 +1418,7 @@ local function spamassassin_check(task, content, digest, rule)
         local pattern_result = "Spam: .* / 5.0"
         local spam_result = string.match(header, pattern_result)
         lua_util.debugm(N, task, '%s [%s]: returned Spam Result : %s', rule['symbol'], rule['type'], spam_result)
-        local pattern_score = "(Spam:.*; )(%-?%d%.%d)( / 5%.0)"
+        local pattern_score = "(Spam:.*; )(%-?%d?%d%.%d)( / 5%.0)"
         local spam_score = string.gsub(spam_result, pattern_score, "%2")
         lua_util.debugm(N, task, '%s [%s]: returned Spam Score: %s', rule['symbol'], rule['type'], spam_score)
 
