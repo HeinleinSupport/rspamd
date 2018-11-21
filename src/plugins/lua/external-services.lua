@@ -1499,7 +1499,7 @@ local function add_external_services_rule(sym, opts)
     return nil
   end
 
-  if not opts['symbol'] then opts['symbol'] = sym end
+  if not opts['symbol'] then opts['symbol'] = sym:upper() end
   local cfg = av_types[opts['type']]
 
   if not opts['symbol_fail'] then
@@ -1559,21 +1559,20 @@ local function add_external_services_rule(sym, opts)
     if rule.scan_mime_parts then
       local parts = task:get_parts() or {}
 
-      for _,p in ipairs(parts) do
-        if (
-            (p:is_image() and rule.scan_image_mime)
-            or (p:is_text() and rule.scan_text_mime)
-            or (p:is_multipart() and rule.scan_text_mime)
-            or (not p:is_image() and not p:is_text() and not p:is_multipart())
-            ) then
-
-          local content = p:get_content()
-
-          if content and #content > 0 then
-            cfg.check(task, content, p:get_digest(), rule)
-          end
-        end
+      local filter_func = function(p)
+        return (rule.scan_image_mime and p:is_image())
+            or (rule.scan_text_mime and p:is_text())
+            or (p:get_filename())
       end
+
+      fun.each(function(p)
+        local content = p:get_content()
+
+        if content and #content > 0 then
+          cfg.check(task, content, p:get_digest(), rule)
+        end
+      end, fun.filter(filter_func, parts))
+
     else
       cfg.check(task, task:get_content(), task:get_digest(), rule)
     end
@@ -1586,8 +1585,10 @@ if opts and type(opts) == 'table' then
   redis_params = rspamd_parse_redis_server('external-services')
   local has_valid = false
   for k, m in pairs(opts) do
-    if type(m) == 'table' and m['type'] and m['servers'] then
+    if type(m) == 'table' and m.servers then
+      if not m.type then m.type = k end
       local cb = add_external_services_rule(k, m)
+
       if not cb then
         rspamd_logger.errx(rspamd_config, 'cannot add rule: "' .. k .. '"')
       else
