@@ -1422,20 +1422,10 @@ local function spamassassin_check(task, content, digest, rule)
         local spam_score = string.gsub(spam_result, pattern_score, "%2")
         lua_util.debugm(N, task, '%s [%s]: returned Spam Score: %s', rule['symbol'], rule['type'], spam_score)
 
-        local score = 0
-        if string.match(symbols, "IXHASH") then
-          lua_util.debugm(N, task, '%s [%s]: returned Found iXhash', rule['symbol'], rule['type'])
-          score = 5
-        end
-
-        --score = score + spam_score*2
-        score = score + spam_score
-        lua_util.debugm(N, task, '%s [%s]: returned Score Sum: %s', rule['symbol'], rule['type'], score)
-
         local threat_string = symbols_table
 
-        yield_result(task, rule, threat_string, score)
-        save_av_cache(task, digest, rule, threat_string, score)
+        yield_result(task, rule, threat_string, spam_score)
+        save_av_cache(task, digest, rule, threat_string, spam_score)
       end
     end
 
