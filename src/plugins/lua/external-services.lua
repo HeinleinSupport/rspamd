@@ -131,9 +131,9 @@ end
 
 local function clamav_config(opts)
   local clamav_conf = {
-    scan_mime_parts = true;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 3310,
     log_clean = false,
     timeout = 15.0,
@@ -173,9 +173,9 @@ end
 
 local function fprot_config(opts)
   local fprot_conf = {
-    scan_mime_parts = true;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 10200,
     timeout = 15.0,
     log_clean = false,
@@ -215,9 +215,9 @@ end
 
 local function sophos_config(opts)
   local sophos_conf = {
-    scan_mime_parts = true;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 4010,
     timeout = 15.0,
     log_clean = false,
@@ -259,9 +259,9 @@ end
 
 local function savapi_config(opts)
   local savapi_conf = {
-    scan_mime_parts = true;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 4444, -- note: You must set ListenAddress in savapi.conf
     product_id = 0,
     log_clean = false,
@@ -303,9 +303,9 @@ end
 local function dcc_config(opts)
 
   local dcc_conf = {
-    scan_mime_parts = false;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 10045,
     timeout = 15.0,
     log_clean = false,
@@ -348,9 +348,9 @@ end
 local function pyzor_config(opts)
 
   local pyzor_conf = {
-    scan_mime_parts = false;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 5953,
     timeout = 15.0,
     log_clean = false,
@@ -392,9 +392,9 @@ end
 local function razor_config(opts)
 
   local razor_conf = {
-    scan_mime_parts = false;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 9192,
     timeout = 15.0,
     log_clean = false,
@@ -436,9 +436,9 @@ end
 local function spamassassin_config(opts)
 
   local spamassassin_conf = {
-    scan_mime_parts = false;
-    scan_text_mime = false;
-    scan_image_mime = false;
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
     default_port = 783,
     timeout = 15.0,
     log_clean = false,
@@ -1443,6 +1443,91 @@ local function spamassassin_check(task, content, digest, rule)
       return
     else
       spamassassin_check_uncached()
+    end
+  end
+end
+
+local function icap_check(task, content, digest, rule)
+  local function icap_check_uncached ()
+    local upstream = rule.upstreams:get_upstream_round_robin()
+    local addr = upstream:get_addr()
+    local retransmits = rule.retransmits
+
+    -- Build the icap query
+    local size = string.format("%x", tonumber(task:get_size()) * 256)
+    local request_data = {
+      "RESPMOD icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rrule.scheme .. " ICAP/1.0\r\n",
+      "Encapsulated: res-body=0\r\n",
+      "\r\n",
+      size .. "\r\n",
+      task:get_content() .. "\r\n",
+      "0\r\n",
+    }
+    --lua_util.debugm(N, task, '%s [%s]: get_content: %s', rule['symbol'], rule['type'], task:get_content())
+    lua_util.debugm(N, task, '%s [%s]: request_data: %s', rule['symbol'], rule['type'], request_data)
+
+    local function icap_callback(err, data, conn)
+
+      if err then
+
+          -- set current upstream to fail because an error occurred
+          upstream:fail()
+
+          -- retry with another upstream until retransmits exceeds
+          if retransmits > 0 then
+
+            retransmits = retransmits - 1
+
+            -- Select a different upstream!
+            upstream = rule.upstreams:get_upstream_round_robin()
+            addr = upstream:get_addr()
+
+            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+
+            tcp.request({
+              task = task,
+              host = addr:to_string(),
+              port = addr:get_port(),
+              timeout = rule['timeout'],
+              data = request_data,
+              callback = icap_callback,
+            })
+          else
+            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
+          end
+      else
+        -- Parse the response
+        if upstream then upstream:ok() end
+
+        lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
+        local header = tostring(data)
+        --[[
+        X-Spam-Status: No, score=1.1 required=5.0 tests=HTML_MESSAGE,MIME_HTML_ONLY,
+          TVD_RCVD_SPACE_BRACKET,UNPARSEABLE_RELAY autolearn=no
+          autolearn_force=no version=3.4.2
+        ]] --
+
+
+        --yield_result(task, rule, threat_string, spam_score)
+        --save_av_cache(task, digest, rule, threat_string, spam_score)
+      end
+    end
+
+    tcp.request({
+      task = task,
+      host = addr:to_string(),
+      port = addr:get_port(),
+      timeout = rule['timeout'],
+      data = request_data,
+      callback = icap_callback,
+    })
+  end
+  if need_av_check(task, content, rule) then
+    if check_av_cache(task, digest, rule, icap_check_uncached) then
+      return
+    else
+      icap_check_uncached()
     end
   end
 end
