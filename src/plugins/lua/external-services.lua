@@ -73,8 +73,8 @@ end
 
 local default_message = '${SCANNER}: virus found: "${VIRUS}"'
 
-local function match_patterns(default_sym, found, patterns,score)
-  if type(patterns) ~= 'table' then return default_sym,score end
+local function match_patterns(default_sym, found, patterns, score)
+  if type(patterns) ~= 'table' then return default_sym, score end
   if not patterns[1] then
     for sym, pat in pairs(patterns) do
       if pat:match(found) then
@@ -103,7 +103,8 @@ local function yield_result(task, rule, vname, score)
       return
     end
     task:insert_result(symname, symscore, vname)
-    rspamd_logger.infox(task, '%s: %s found: "%s"', rule['type'], rule['detection_category'], vname)
+    rspamd_logger.infox(task, '%s: %s found: "%s" - score %s', rule['type'],
+      rule['detection_category'], vname, symscore)
   elseif type(vname) == 'table' then
     for _, vn in ipairs(vname) do
       local symname,symscore = match_patterns(rule['symbol'], vn, rule['patterns'],score)
@@ -112,7 +113,8 @@ local function yield_result(task, rule, vname, score)
       else
         all_whitelisted = false
         task:insert_result(symname, symscore, vn)
-        rspamd_logger.infox(task, '%s: %s found: "%s"', rule['type'], rule['detection_category'], vn)
+        rspamd_logger.infox(task, '%s: %s found: "%s" - score %s', rule['type'],
+          rule['detection_category'], vn, symscore)
       end
     end
   end
@@ -1041,7 +1043,7 @@ local function dcc_check(task, content, digest, rule)
       envfrom .. "\n",
       envrcpt .. "\n",
       "\n",
-      task:get_content()
+      content
     }
 
     local function dcc_callback(err, data, conn)
@@ -1168,7 +1170,7 @@ local function pyzor_check(task, content, digest, rule)
               port = addr:get_port(),
               timeout = rule['timeout'],
               shutdown = true,
-              data = { "CHECK\n" , task:get_content() },
+              data = { "CHECK\n" , content },
               callback = pyzor_callback,
             })
           else
@@ -1178,10 +1180,6 @@ local function pyzor_check(task, content, digest, rule)
       else
         -- Parse the response
         if upstream then upstream:ok() end
-
-        local _,_,result,disposition,header = tostring(data):find("(.-)\n(.-)\n(.-)\n")
-        lua_util.debugm(N, task, 'DCC result=%1 disposition=%2 header="%3"',
-          result, disposition, header)
 
         lua_util.debugm(N, task, 'data: %s', tostring(data))
         local ucl_parser = ucl.parser()
@@ -1251,7 +1249,7 @@ local function pyzor_check(task, content, digest, rule)
       port = addr:get_port(),
       timeout = rule['timeout'],
       shutdown = true,
-      data = { "CHECK\n" , task:get_content() },
+      data = { "CHECK\n" , content },
       callback = pyzor_callback,
     })
   end
@@ -1296,7 +1294,7 @@ local function razor_check(task, content, digest, rule)
               port = addr:get_port(),
               timeout = rule['timeout'],
               shutdown = true,
-              data = task:get_content(),
+              data = content,
               callback = razor_callback,
             })
           else
@@ -1334,7 +1332,7 @@ local function razor_check(task, content, digest, rule)
       port = addr:get_port(),
       timeout = rule['timeout'],
       shutdown = true,
-      data = task:get_content(),
+      data = content,
       callback = razor_callback,
     })
   end
@@ -1358,9 +1356,9 @@ local function spamassassin_check(task, content, digest, rule)
     local request_data = {
       "HEADERS SPAMC/1.5\r\n",
       "User: root\r\n",
-      "Content-length: ".. task:get_size() .. "\r\n",
+      "Content-length: ".. #content .. "\r\n",
       "\r\n",
-      task:get_content(),
+      content,
     }
     --lua_util.debugm(N, task, '%s [%s]: get_content: %s', rule['symbol'], rule['type'], task:get_content())
     --lua_util.debugm(N, task, '%s [%s]: request_data: %s', rule['symbol'], rule['type'], request_data)
@@ -1399,33 +1397,36 @@ local function spamassassin_check(task, content, digest, rule)
         -- Parse the response
         if upstream then upstream:ok() end
 
-        --lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
+        lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
         local header = tostring(data)
         --[[
         X-Spam-Status: No, score=1.1 required=5.0 tests=HTML_MESSAGE,MIME_HTML_ONLY,
           TVD_RCVD_SPACE_BRACKET,UNPARSEABLE_RELAY autolearn=no
           autolearn_force=no version=3.4.2
         ]] --
-        local pattern_symbols = "(.*X%-Spam%-Status.*tests%=)(.*)(autolearn.no.*version%=%d%.%d%.%d.*)"
+        local pattern_symbols = "(.*X%-Spam%-Status.*tests%=)(.*)(autolearn%=.*version%=%d%.%d%.%d.*)"
         local symbols = string.gsub(header, pattern_symbols, "%2")
         symbols = string.gsub(symbols, "%s*", "")
         lua_util.debugm(N, task, '%s [%s]: returned symbols: %s', rule['symbol'], rule['type'], symbols)
-        local symbols_table = rspamd_str_split(symbols, ",")
-        lua_util.debugm(N, task, '%s [%s]: returned symbols: %s', rule['symbol'], rule['type'], symbols_table)
-        --[[
-        Spam: False ; 1.1 / 5.0
-        ]] --
-        local pattern_result = "Spam: .* / 5.0"
-        local spam_result = string.match(header, pattern_result)
-        lua_util.debugm(N, task, '%s [%s]: returned Spam Result : %s', rule['symbol'], rule['type'], spam_result)
-        local pattern_score = "(Spam:.*; )(%-?%d?%d%.%d)( / 5%.0)"
-        local spam_score = string.gsub(spam_result, pattern_score, "%2")
-        lua_util.debugm(N, task, '%s [%s]: returned Spam Score: %s', rule['symbol'], rule['type'], spam_score)
+        local symbols_table = {}
+        if symbols ~= "none" then
+          symbols_table = rspamd_str_split(symbols, ",")
+          lua_util.debugm(N, task, '%s [%s]: returned symbols as table: %s', rule['symbol'], rule['type'], symbols_table)
 
-        local threat_string = symbols_table
+          --[[
+          Spam: False ; 1.1 / 5.0
+          ]] --
+          local pattern_result = "Spam: .* / 5.0"
+          local spam_result = string.match(header, pattern_result)
+          lua_util.debugm(N, task, '%s [%s]: returned Spam Result : %s', rule['symbol'], rule['type'], spam_result)
+          local pattern_score = "(Spam:.*; )(%-?%d?%d%.%d)( / 5%.0)"
+          local spam_score = string.gsub(spam_result, pattern_score, "%2")
+          lua_util.debugm(N, task, '%s [%s]: returned Spam Score: %s', rule['symbol'], rule['type'], spam_score)
 
-        yield_result(task, rule, threat_string, spam_score)
-        save_av_cache(task, digest, rule, threat_string, spam_score)
+          yield_result(task, rule, symbols_table, spam_score)
+          save_av_cache(task, digest, rule, symbols_table, spam_score)
+
+        end
       end
     end
 
