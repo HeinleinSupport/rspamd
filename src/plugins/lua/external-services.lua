@@ -480,6 +480,52 @@ local function spamassassin_config(opts)
   return nil
 end
 
+local function icap_config(opts)
+
+  local icap_conf = {
+    scan_mime_parts = true,
+    scan_text_mime = false,
+    scan_image_mime = false,
+    icap_scheme = "sophos",
+    default_port = 4020,
+    timeout = 15.0,
+    log_clean = false,
+    retransmits = 2,
+    cache_expire = 7200, -- expire redis in one hour
+    message = '${SCANNER}: threat found with icap scanner: "${VIRUS}"',
+    detection_category = "hash",
+    default_score = 1,
+    action = false,
+    symbol = "ICAP_V",
+  }
+
+  for k,v in pairs(opts) do
+    icap_conf[k] = v
+  end
+
+  if not icap_conf.prefix then
+    icap_conf.prefix = 'rs_av_icap_'
+  end
+
+  if not icap_conf['servers'] then
+    rspamd_logger.errx(rspamd_config, 'no servers defined')
+
+    return nil
+  end
+
+  icap_conf['upstreams'] = upstream_list.create(rspamd_config,
+    icap_conf['servers'],
+    icap_conf.default_port)
+
+  if icap_conf['upstreams'] then
+    return icap_conf
+  end
+
+  rspamd_logger.errx(rspamd_config, 'cannot parse servers %s',
+    icap_conf['servers'])
+  return nil
+end
+
 
 local function message_not_too_large(task, content, rule)
   local max_size = tonumber(rule['max_size'])
@@ -1455,17 +1501,18 @@ local function icap_check(task, content, digest, rule)
     local retransmits = rule.retransmits
 
     -- Build the icap query
-    local size = string.format("%x", tonumber(task:get_size()) * 256)
+    --lua_util.debugm(N, task, '%s [%s]: size: %s - %s', rule['symbol'], rule['type'], tonumber(task:get_size()), string.format('%02X', string.byte(task:get_size())))
+    local size = string.format("%x", tonumber(#content))
     local request_data = {
-      "RESPMOD icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rrule.scheme .. " ICAP/1.0\r\n",
+      "RESPMOD icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rule.scheme .. " ICAP/1.0\r\n",
       "Encapsulated: res-body=0\r\n",
       "\r\n",
       size .. "\r\n",
-      task:get_content() .. "\r\n",
-      "0\r\n",
+      content,
+      "\r\n0\r\n",
     }
     --lua_util.debugm(N, task, '%s [%s]: get_content: %s', rule['symbol'], rule['type'], task:get_content())
-    lua_util.debugm(N, task, '%s [%s]: request_data: %s', rule['symbol'], rule['type'], request_data)
+    --lua_util.debugm(N, task, '%s [%s]: request_data: %s', rule['symbol'], rule['type'], request_data)
 
     local function icap_callback(err, data, conn)
 
@@ -1491,7 +1538,9 @@ local function icap_check(task, content, digest, rule)
               port = addr:get_port(),
               timeout = rule['timeout'],
               data = request_data,
+              shutdown = true,
               callback = icap_callback,
+              stop_pattern = '\r\n',
             })
           else
             rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
@@ -1501,14 +1550,8 @@ local function icap_check(task, content, digest, rule)
         -- Parse the response
         if upstream then upstream:ok() end
 
-        lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
         local header = tostring(data)
-        --[[
-        X-Spam-Status: No, score=1.1 required=5.0 tests=HTML_MESSAGE,MIME_HTML_ONLY,
-          TVD_RCVD_SPACE_BRACKET,UNPARSEABLE_RELAY autolearn=no
-          autolearn_force=no version=3.4.2
-        ]] --
-
+        lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], header)
 
         --yield_result(task, rule, threat_string, spam_score)
         --save_av_cache(task, digest, rule, threat_string, spam_score)
@@ -1521,6 +1564,7 @@ local function icap_check(task, content, digest, rule)
       port = addr:get_port(),
       timeout = rule['timeout'],
       data = request_data,
+      shutdown = true,
       callback = icap_callback,
     })
   end
@@ -1566,6 +1610,10 @@ local av_types = {
   spamassassin = {
     configure = spamassassin_config,
     check = spamassassin_check
+  },
+  icap = {
+    configure = icap_config,
+    check = icap_check
   },
 }
 
@@ -1645,6 +1693,7 @@ local function add_external_services_rule(sym, opts)
         local content = p:get_content()
 
         if content and #content > 0 then
+          --lua_util.debugm(N, task, '%s [%s]: content: %s', rule['symbol'], rule['type'], content)
           cfg.check(task, content, p:get_digest(), rule)
         end
       end, fun.filter(filter_func, parts))
