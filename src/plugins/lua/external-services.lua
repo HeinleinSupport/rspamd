@@ -1445,33 +1445,35 @@ local function spamassassin_check(task, content, digest, rule)
 
         lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
         local header = tostring(data)
+
+        --[[
+        Spam: False ; 1.1 / 5.0
+        ]] --
+        local pattern_result = "Spam: .* / 5.0"
+        local spam_result = string.match(header, pattern_result)
+        lua_util.debugm(N, task, '%s [%s]: returned Spam Result : %s', rule['symbol'], rule['type'], spam_result)
+        local pattern_score = "(Spam:.*; )(%-?%d?%d%.%d)( / 5%.0)"
+        local spam_score = string.gsub(spam_result, pattern_score, "%2")
+        lua_util.debugm(N, task, '%s [%s]: returned Spam Score: %s', rule['symbol'], rule['type'], spam_score)
+
         --[[
         X-Spam-Status: No, score=1.1 required=5.0 tests=HTML_MESSAGE,MIME_HTML_ONLY,
           TVD_RCVD_SPACE_BRACKET,UNPARSEABLE_RELAY autolearn=no
           autolearn_force=no version=3.4.2
         ]] --
-        local pattern_symbols = "(.*X%-Spam%-Status.*tests%=)(.*)(autolearn%=.*version%=%d%.%d%.%d.*)"
-        local symbols = string.gsub(header, pattern_symbols, "%2")
-        symbols = string.gsub(symbols, "%s*", "")
-        lua_util.debugm(N, task, '%s [%s]: returned symbols: %s', rule['symbol'], rule['type'], symbols)
-        local symbols_table = {}
-        if symbols ~= "none" then
-          symbols_table = rspamd_str_split(symbols, ",")
-          lua_util.debugm(N, task, '%s [%s]: returned symbols as table: %s', rule['symbol'], rule['type'], symbols_table)
+        if string.find(header, 'X%-Spam%-Status') then
+          local pattern_symbols = "(.*X%-Spam%-Status.*tests%=)(.*)(autolearn%=.*version%=%d%.%d%.%d.*)"
+          local symbols = string.gsub(header, pattern_symbols, "%2")
+          symbols = string.gsub(symbols, "%s*", "")
+          lua_util.debugm(N, task, '%s [%s]: returned symbols: %s', rule['symbol'], rule['type'], symbols)
+          local symbols_table = {}
+          if symbols ~= "none" then
+            symbols_table = rspamd_str_split(symbols, ",")
+            lua_util.debugm(N, task, '%s [%s]: returned symbols as table: %s', rule['symbol'], rule['type'], symbols_table)
 
-          --[[
-          Spam: False ; 1.1 / 5.0
-          ]] --
-          local pattern_result = "Spam: .* / 5.0"
-          local spam_result = string.match(header, pattern_result)
-          lua_util.debugm(N, task, '%s [%s]: returned Spam Result : %s', rule['symbol'], rule['type'], spam_result)
-          local pattern_score = "(Spam:.*; )(%-?%d?%d%.%d)( / 5%.0)"
-          local spam_score = string.gsub(spam_result, pattern_score, "%2")
-          lua_util.debugm(N, task, '%s [%s]: returned Spam Score: %s', rule['symbol'], rule['type'], spam_score)
-
-          yield_result(task, rule, symbols_table, spam_score)
-          save_av_cache(task, digest, rule, symbols_table, spam_score)
-
+            yield_result(task, rule, symbols_table, spam_score)
+            save_av_cache(task, digest, rule, symbols_table, spam_score)
+          end
         end
       end
     end
