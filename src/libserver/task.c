@@ -267,9 +267,6 @@ rspamd_task_free (struct rspamd_task *task)
 			if (tp->languages) {
 				g_ptr_array_unref (tp->languages);
 			}
-			if (tp->unicode_raw_content) {
-				g_array_free (tp->unicode_raw_content, TRUE);
-			}
 		}
 
 		if (task->rcpt_envelope) {
@@ -283,6 +280,10 @@ rspamd_task_free (struct rspamd_task *task)
 
 		if (task->from_envelope) {
 			rspamd_email_address_free (task->from_envelope);
+		}
+
+		if (task->meta_words) {
+			g_array_free (task->meta_words, TRUE);
 		}
 
 		ucl_object_unref (task->messages);

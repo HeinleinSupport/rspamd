@@ -2237,24 +2237,70 @@ rspamd_memrchr (const void *m, gint c, gsize len)
 	return NULL;
 }
 
+struct UConverter *
+rspamd_get_utf8_converter (void)
+{
+	static UConverter *utf8_conv = NULL;
+	UErrorCode uc_err = U_ZERO_ERROR;
+
+	if (utf8_conv == NULL) {
+		utf8_conv = ucnv_open ("UTF-8", &uc_err);
+		if (!U_SUCCESS (uc_err)) {
+			msg_err ("FATAL error: cannot open converter for utf8: %s",
+					u_errorName (uc_err));
+
+			g_assert_not_reached ();
+		}
+
+		ucnv_setFromUCallBack (utf8_conv,
+				UCNV_FROM_U_CALLBACK_SUBSTITUTE,
+				NULL,
+				NULL,
+				NULL,
+				&uc_err);
+		ucnv_setToUCallBack (utf8_conv,
+				UCNV_TO_U_CALLBACK_SUBSTITUTE,
+				NULL,
+				NULL,
+				NULL,
+				&uc_err);
+	}
+
+	return utf8_conv;
+}
+
+
+const struct UNormalizer2 *
+rspamd_get_unicode_normalizer (void)
+{
+#if U_ICU_VERSION_MAJOR_NUM >= 44
+	UErrorCode uc_err = U_ZERO_ERROR;
+	static const UNormalizer2 *norm = NULL;
+
+	if (norm == NULL) {
+		norm = unorm2_getInstance (NULL, "nfkc", UNORM2_COMPOSE, &uc_err);
+		g_assert (U_SUCCESS (uc_err));
+	}
+
+	return norm;
+#else
+	/* Old libicu */
+	return NULL;
+#endif
+}
+
+
 gboolean
 rspamd_normalise_unicode_inplace (rspamd_mempool_t *pool, gchar *start,
 		guint *len)
 {
 #if U_ICU_VERSION_MAJOR_NUM >= 44
 	UErrorCode uc_err = U_ZERO_ERROR;
-	static UConverter *utf8_conv = NULL;
-	static const UNormalizer2 *norm = NULL;
+	UConverter *utf8_conv = rspamd_get_utf8_converter ();
+	const UNormalizer2 *norm = rspamd_get_unicode_normalizer ();
 	gint32 nsym, end;
 	UChar *src = NULL, *dest = NULL;
 	gboolean ret = FALSE;
-
-	if (utf8_conv == NULL) {
-		utf8_conv = ucnv_open ("UTF-8", &uc_err);
-		g_assert (U_SUCCESS (uc_err));
-		norm = unorm2_getInstance (NULL, "nfkc", UNORM2_COMPOSE, &uc_err);
-		g_assert (U_SUCCESS (uc_err));
-	}
 
 	/* We first need to convert data to UChars :( */
 	src = g_malloc ((*len + 1) * sizeof (*src));
@@ -2379,7 +2425,7 @@ rspamd_str_regexp_escape (const gchar *pattern, gsize slen,
 
 	if (flags & RSPAMD_REGEXP_ESCAPE_UTF) {
 		if (!g_utf8_validate (pattern, slen, NULL)) {
-			tmp_utf = g_utf8_make_valid (pattern, slen);
+			tmp_utf = rspamd_str_make_utf_valid (pattern, slen, NULL);
 		}
 	}
 
@@ -2470,4 +2516,62 @@ rspamd_str_regexp_escape (const gchar *pattern, gsize slen,
 	}
 
 	return res;
+}
+
+
+gchar *
+rspamd_str_make_utf_valid (const gchar *src, gsize slen, gsize *dstlen)
+{
+	GString *dst;
+	const gchar *last;
+	gchar *dchar;
+	gsize i, valid, prev;
+	UChar32 uc;
+
+	if (src == NULL) {
+		return NULL;
+	}
+
+	if (slen == 0) {
+		slen = strlen (src);
+	}
+
+	dst = g_string_sized_new (slen);
+	i = 0;
+	last = src;
+	valid = 0;
+	prev = 0;
+
+	while (i < slen) {
+		U8_NEXT (src, i, slen, uc);
+
+		if (uc <= 0) {
+			if (valid > 0) {
+				g_string_append_len (dst, last, valid);
+			}
+			/* 0xFFFD in UTF8 */
+			g_string_append_len (dst, "\357\277\275", 3);
+			valid = 0;
+			last = &src[i];
+		}
+		else {
+			valid += i - prev;
+		}
+
+		prev = i;
+	}
+
+	if (valid > 0) {
+		g_string_append_len (dst, last, valid);
+	}
+
+	dchar = dst->str;
+
+	if (dstlen) {
+		*dstlen = dst->len;
+	}
+
+	g_string_free (dst, FALSE);
+
+	return dchar;
 }

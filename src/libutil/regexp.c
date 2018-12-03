@@ -379,6 +379,7 @@ rspamd_regexp_new (const gchar *pattern, const gchar *flags,
 				break;
 			case 'u':
 				rspamd_flags &= ~RSPAMD_REGEXP_FLAG_RAW;
+				rspamd_flags |= RSPAMD_REGEXP_FLAG_UTF;
 #ifndef WITH_PCRE2
 				regexp_flags |= PCRE_FLAG(UTF8);
 #else
@@ -392,6 +393,7 @@ rspamd_regexp_new (const gchar *pattern, const gchar *flags,
 				break;
 			case 'r':
 				rspamd_flags |= RSPAMD_REGEXP_FLAG_RAW;
+				rspamd_flags &= ~RSPAMD_REGEXP_FLAG_UTF;
 #ifndef WITH_PCRE2
 				regexp_flags &= ~PCRE_FLAG(UTF8);
 #else
@@ -570,7 +572,11 @@ rspamd_regexp_search (rspamd_regexp_t *re, const gchar *text, gsize len,
 #endif
 	}
 
-	g_assert (r != NULL);
+	if (r == NULL) {
+		/* Invalid regexp type for the specified input */
+		return FALSE;
+	}
+
 	ncaptures = (re->ncaptures + 1) * 3;
 	ovec = g_alloca (sizeof (gint) * ncaptures);
 

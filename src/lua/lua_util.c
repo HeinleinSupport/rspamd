@@ -1120,7 +1120,7 @@ lua_util_tokenize_text (lua_State *L)
 					ex = g_malloc0 (sizeof (*ex));
 					ex->pos = pos;
 					ex->len = ex_len;
-					ex->type = RSPAMD_EXCEPTION_URL;
+					ex->type = RSPAMD_EXCEPTION_GENERIC;
 					exceptions = g_list_prepend (exceptions, ex);
 				}
 			}
@@ -1144,7 +1144,7 @@ lua_util_tokenize_text (lua_State *L)
 			&utxt,
 			RSPAMD_TOKENIZE_UTF, NULL,
 			exceptions,
-			NULL);
+			NULL, NULL);
 
 	if (res == NULL) {
 		lua_pushnil (L);
@@ -1154,7 +1154,7 @@ lua_util_tokenize_text (lua_State *L)
 
 		for (i = 0; i < res->len; i ++) {
 			w = &g_array_index (res, rspamd_stat_token_t, i);
-			lua_pushlstring (L, w->begin, w->len);
+			lua_pushlstring (L, w->original.begin, w->original.len);
 			lua_rawseti (L, -2, i + 1);
 		}
 	}
@@ -2458,7 +2458,7 @@ static gint
 lua_util_readline (lua_State *L)
 {
 	LUA_TRACE_POINT;
-	const gchar *prompt = NULL;
+	const gchar *prompt = "";
 	gchar *input;
 
 	if (lua_type (L, 1) == LUA_TSTRING) {

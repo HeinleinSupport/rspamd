@@ -41,6 +41,7 @@ rspamd_stat_tokenize_parts_metadata (struct rspamd_stat_ctx *st_ctx,
 	lua_State *L = task->cfg->lua_state;
 
 	ar = g_array_sized_new (FALSE, FALSE, sizeof (elt), 16);
+	memset (&elt, 0, sizeof (elt));
 	elt.flags = RSPAMD_STAT_TOKEN_FLAG_META;
 
 	if (st_ctx->lua_stat_tokens_ref != -1) {
@@ -82,8 +83,13 @@ rspamd_stat_tokenize_parts_metadata (struct rspamd_stat_ctx *st_ctx,
 					tok.begin = lua_tolstring (L, -1, &tok.len);
 
 					if (tok.begin && tok.len > 0) {
-						elt.begin = rspamd_mempool_ftokdup (task->task_pool, &tok);
-						elt.len = tok.len;
+						elt.original.begin =
+								rspamd_mempool_ftokdup (task->task_pool, &tok);
+						elt.original.len = tok.len;
+						elt.stemmed.begin = elt.original.begin;
+						elt.stemmed.len = elt.original.len;
+						elt.normalized.begin = elt.original.begin;
+						elt.normalized.len = elt.original.len;
 
 						g_array_append_val (ar, elt);
 					}
@@ -120,7 +126,6 @@ rspamd_stat_process_tokenize (struct rspamd_stat_ctx *st_ctx,
 	struct rspamd_mime_text_part *part;
 	rspamd_cryptobox_hash_state_t hst;
 	rspamd_token_t *st_tok;
-	GArray *words;
 	guint i, reserved_len = 0;
 	gdouble *pdiff;
 	guchar hout[rspamd_cryptobox_HASHBYTES];
@@ -164,19 +169,13 @@ rspamd_stat_process_tokenize (struct rspamd_stat_ctx *st_ctx,
 		}
 	}
 
-	if (task->subject != NULL) {
-		words = rspamd_tokenize_subject (task);
-		if (words != NULL) {
-			st_ctx->tokenizer->tokenize_func (st_ctx,
-					task,
-					words,
-					TRUE,
-					"SUBJECT",
-					task->tokens);
-
-			rspamd_mempool_add_destructor (task->task_pool,
-					rspamd_array_free_hard, words);
-		}
+	if (task->meta_words != NULL) {
+		st_ctx->tokenizer->tokenize_func (st_ctx,
+				task,
+				task->meta_words,
+				TRUE,
+				"SUBJECT",
+				task->tokens);
 	}
 
 	rspamd_stat_tokenize_parts_metadata (st_ctx, task);
@@ -527,7 +526,7 @@ rspamd_stat_classifiers_learn (struct rspamd_stat_ctx *st_ctx,
 	if ((task->flags & RSPAMD_TASK_FLAG_ALREADY_LEARNED) && err != NULL &&
 			*err == NULL) {
 		/* Do not learn twice */
-		g_set_error (err, rspamd_stat_quark (), 404, "<%s> has been already "
+		g_set_error (err, rspamd_stat_quark (), 208, "<%s> has been already "
 				"learned as %s, ignore it", task->message_id,
 				spam ? "spam" : "ham");
 
@@ -636,7 +635,7 @@ rspamd_stat_classifiers_learn (struct rspamd_stat_ctx *st_ctx,
 
 	if (!learned && err && *err == NULL) {
 		if (too_large) {
-			g_set_error (err, rspamd_stat_quark (), 400,
+			g_set_error (err, rspamd_stat_quark (), 204,
 					"<%s> contains more tokens than allowed for %s classifier: "
 					"%d > %d",
 					task->message_id,
@@ -645,7 +644,7 @@ rspamd_stat_classifiers_learn (struct rspamd_stat_ctx *st_ctx,
 					cl->cfg->max_tokens);
 		}
 		else if (too_small) {
-			g_set_error (err, rspamd_stat_quark (), 400,
+			g_set_error (err, rspamd_stat_quark (), 204,
 					"<%s> contains less tokens than required for %s classifier: "
 					"%d < %d",
 					task->message_id,
@@ -654,7 +653,7 @@ rspamd_stat_classifiers_learn (struct rspamd_stat_ctx *st_ctx,
 					cl->cfg->min_tokens);
 		}
 		else if (conditionally_skipped) {
-			g_set_error (err, rspamd_stat_quark (), 410,
+			g_set_error (err, rspamd_stat_quark (), 204,
 					"<%s> is skipped for %s classifier: "
 					"%s",
 					task->message_id,

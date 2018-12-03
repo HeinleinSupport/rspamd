@@ -386,6 +386,12 @@ rspamd_str_has_8bit (const guchar *beg, gsize len)
 	return FALSE;
 }
 
+struct UConverter;
+struct UConverter *rspamd_get_utf8_converter (void);
+
+struct UNormalizer2;
+const struct UNormalizer2 *rspamd_get_unicode_normalizer (void);
+
 /**
  * Gets a string in UTF8 and normalises it to NFKC_Casefold form
  * @param pool optional memory pool used for logging purposes
@@ -412,5 +418,15 @@ enum rspamd_regexp_escape_flags {
 gchar *
 rspamd_str_regexp_escape (const gchar *pattern, gsize slen,
 		gsize *dst_len, enum rspamd_regexp_escape_flags flags);
+
+/**
+ * Returns copy of src (zero terminated) where all unicode is made valid or replaced
+ * to FFFD characters. Caller must free string after usage
+ * @param src
+ * @param slen
+ * @param dstelen
+ * @return
+ */
+gchar * rspamd_str_make_utf_valid (const gchar *src, gsize slen, gsize *dstlen);
 
 #endif /* SRC_LIBUTIL_STR_UTIL_H_ */
