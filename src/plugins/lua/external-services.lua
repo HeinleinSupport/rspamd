@@ -97,7 +97,7 @@ end
 local function yield_result(task, rule, vname, score)
   local all_whitelisted = true
   if type(vname) == 'string' then
-    local symname,symscore = match_patterns(rule['symbol'], vname, rule['patterns'],score)
+    local symname,symscore = match_patterns(rule['symbol'], vname, rule['patterns'], score)
     if rule['whitelist'] and rule['whitelist']:get_key(vname) then
       rspamd_logger.infox(task, '%s: "%s" is in whitelist', rule['type'], vname)
       return
@@ -107,7 +107,7 @@ local function yield_result(task, rule, vname, score)
       rule['detection_category'], vname, symscore)
   elseif type(vname) == 'table' then
     for _, vn in ipairs(vname) do
-      local symname,symscore = match_patterns(rule['symbol'], vn, rule['patterns'],score)
+      local symname,symscore = match_patterns(rule['symbol'], vn, rule['patterns'], score)
       if rule['whitelist'] and rule['whitelist']:get_key(vn) then
         rspamd_logger.infox(task, '%s: "%s" is in whitelist', rule['type'], vn)
       else
@@ -1461,7 +1461,7 @@ local function spamassassin_check(task, content, digest, rule)
           TVD_RCVD_SPACE_BRACKET,UNPARSEABLE_RELAY autolearn=no
           autolearn_force=no version=3.4.2
         ]] --
-        if string.find(header, 'X%-Spam%-Status') then
+        if tonumber(spam_score) > 0 and string.find(header, 'X%-Spam%-Status') then
           local pattern_symbols = "(.*X%-Spam%-Status.*tests%=)(.*)(autolearn%=.*version%=%d%.%d%.%d.*)"
           local symbols = string.gsub(header, pattern_symbols, "%2")
           symbols = string.gsub(symbols, "%s*", "")
