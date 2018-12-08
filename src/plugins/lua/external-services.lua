@@ -484,9 +484,10 @@ local function icap_config(opts)
 
   local icap_conf = {
     scan_mime_parts = true,
+    scan_all_mime_parts = true,
     scan_text_mime = false,
     scan_image_mime = false,
-    icap_scheme = "sophos",
+    scheme = "scan",
     default_port = 4020,
     timeout = 15.0,
     log_clean = false,
@@ -1549,14 +1550,35 @@ local function icap_check(task, content, digest, rule)
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
-        -- Parse the response
+        -- set upstream ok
         if upstream then upstream:ok() end
-
+        -- Parse the response
         local header = tostring(data)
+        local threat_string = {}
         lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], header)
 
-        --yield_result(task, rule, threat_string, spam_score)
-        --save_av_cache(task, digest, rule, threat_string, spam_score)
+        --[[
+          X-Virus-ID: Troj/DocDl-OYC
+          X-Infection-Found: Type=0; Resolution=2; Threat=Troj/DocDl-OYC;
+        ]] --
+        for s in header:gmatch("[^\r\n]+") do
+            if string.find(s, 'X%-Virus%-ID') then
+              local pattern_symbols = "(X%-Virus%-ID: )(.*)"
+              local string = string.gsub(s, pattern_symbols, "%2")
+              lua_util.debugm(N, task, '%s [%s]: icap X-Virus-ID: %s', rule['symbol'], rule['type'], string)
+              table.insert(threat_string, string)
+            end
+            if string.find(s, 'X%-Infection%-Found') then
+              local pattern_symbols = "(X%-Infection%-Found: Type%=0; Resolution%=2; Threat%=)(.*)(;)"
+              local string = string.gsub(s, pattern_symbols, "%2")
+              lua_util.debugm(N, task, '%s [%s]: icap X-Infection-Found: %s', rule['symbol'], rule['type'], string)
+              table.insert(threat_string, string)            end
+        end
+
+        if threat_string ~= "" then
+          yield_result(task, rule, threat_string, rule.default_score)
+          save_av_cache(task, digest, rule, threat_string, rule.default_score)
+        end
       end
     end
 
