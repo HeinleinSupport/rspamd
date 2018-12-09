@@ -1567,15 +1567,16 @@ local function icap_check(task, content, digest, rule)
         for s in header:gmatch("[^\r\n]+") do
             if string.find(s, 'X%-Virus%-ID') then
               local pattern_symbols = "(X%-Virus%-ID: )(.*)"
-              local string = string.gsub(s, pattern_symbols, "%2")
-              lua_util.debugm(N, task, '%s [%s]: icap X-Virus-ID: %s', rule['symbol'], rule['type'], string)
-              table.insert(threat_string, string)
+              local match = string.gsub(s, pattern_symbols, "%2")
+              lua_util.debugm(N, task, '%s [%s]: icap X-Virus-ID: %s', rule['symbol'], rule['type'], match)
+              table.insert(threat_string, match)
             end
             if string.find(s, 'X%-Infection%-Found') then
               local pattern_symbols = "(X%-Infection%-Found: Type%=0; Resolution%=2; Threat%=)(.*)(;)"
-              local string = string.gsub(s, pattern_symbols, "%2")
-              lua_util.debugm(N, task, '%s [%s]: icap X-Infection-Found: %s', rule['symbol'], rule['type'], string)
-              table.insert(threat_string, string)            end
+              local match = string.gsub(s, pattern_symbols, "%2")
+              lua_util.debugm(N, task, '%s [%s]: icap X-Infection-Found: %s', rule['symbol'], rule['type'], match)
+              table.insert(threat_string, match)
+            end
         end
 
         if threat_string ~= "" then
