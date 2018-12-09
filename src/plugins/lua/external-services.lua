@@ -1682,70 +1682,38 @@ local function add_external_services_rule(sym, opts)
     return nil
   end
 
-  if type(opts['patterns']) == 'table' then
-    rule['patterns'] = {}
-    if opts['patterns'][1] then
-      for i, p in ipairs(opts['patterns']) do
+  local function create_regex_table(task, patterns)
+    local regex_table = {}
+    if patterns[1] then
+      for i, p in ipairs(patterns) do
         if type(p) == 'table' then
           local new_set = {}
           for k, v in pairs(p) do
             new_set[k] = rspamd_regexp.create_cached(v)
           end
-          rule['patterns'][i] = new_set
+          regex_table[i] = new_set
         else
-          rule['patterns'][i] = {}
+          regex_table[i] = {}
         end
       end
     else
-      for k, v in pairs(opts['patterns']) do
-        rule['patterns'][k] = rspamd_regexp.create_cached(v)
+      for k, v in pairs(patterns) do
+        regex_table[k] = rspamd_regexp.create_cached(v)
       end
     end
+    return regex_table
   end
 
-  if type(opts['mime_parts_filter_regex']) == 'table' then
-    rule['mime_parts_filter_regex'] = {}
-    rule.scan_all_mime_parts = false
-    if opts['mime_parts_filter_regex'][1] then
-      for i, p in ipairs(opts['mime_parts_filter_regex']) do
-        if type(p) == 'table' then
-          local new_set = {}
-          for k, v in pairs(p) do
-            new_set[k] = rspamd_regexp.create_cached(v)
-          end
-          rule['mime_parts_filter_regex'][i] = new_set
-        else
-          rule['mime_parts_filter_regex'][i] = {}
-        end
-      end
-    else
-      for k, v in pairs(opts['mime_parts_filter_regex']) do
-        rule['mime_parts_filter_regex'][k] = rspamd_regexp.create_cached(v)
-      end
-    end
+  if opts['mime_parts_filter_regex'] ~= nil
+    or opts['mime_parts_filter_ext'] ~= nil then
+      rule.scan_all_mime_parts = false
   end
 
-  if type(opts['mime_parts_filter_ext']) == 'table' then
-    rule['mime_parts_filter_ext'] = {}
-    rule.scan_all_mime_parts = false
-    if opts['mime_parts_filter_ext'][1] then
-      for i, p in ipairs(opts['mime_parts_filter_ext']) do
-        if type(p) == 'table' then
-          local new_set = {}
-          for k, v in pairs(p) do
-            new_set[k] = rspamd_regexp.create_cached(v)
-          end
-          rule['mime_parts_filter_ext'][i] = new_set
-        else
-          rule['mime_parts_filter_ext'][i] = {}
-        end
-      end
-    else
-      for k, v in pairs(opts['mime_parts_filter_ext']) do
-        rule['mime_parts_filter_ext'][k] = rspamd_regexp.create_cached(v)
-      end
-    end
-  end
+  rule['patterns'] = create_regex_table(task, opts['patterns'] or {})
+
+  rule['mime_parts_filter_regex'] = create_regex_table(task, opts['mime_parts_filter_regex'] or {})
+
+  rule['mime_parts_filter_ext'] = create_regex_table(task, opts['mime_parts_filter_ext'] or {})
 
   if opts['whitelist'] then
     rule['whitelist'] = rspamd_config:add_hash_map(opts['whitelist'])
