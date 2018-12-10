@@ -73,6 +73,22 @@ end
 
 local default_message = '${SCANNER}: virus found: "${VIRUS}"'
 
+local function text_parts_min_words(task, min_words)
+  local text_parts_empty = true
+  local text_parts = task:get_text_parts()
+
+  local filter_func = function(p)
+    return p:get_words_count() >= min_words
+  end
+
+  fun.each(function(p)
+    text_parts_empty = false
+  end, fun.filter(filter_func, text_parts))
+
+  return text_parts_empty
+
+end
+
 local function match_patterns(default_sym, found, patterns, score)
   if type(patterns) ~= 'table' then return default_sym, score end
   if not patterns[1] then
@@ -353,6 +369,7 @@ local function pyzor_config(opts)
     scan_mime_parts = false,
     scan_text_mime = false,
     scan_image_mime = false,
+    text_part_min_words = 2,
     default_port = 5953,
     timeout = 15.0,
     log_clean = false,
@@ -1290,6 +1307,12 @@ local function pyzor_check(task, content, digest, rule)
       end
     end
 
+    if text_parts_min_words(task, rule.text_part_min_words) then
+      rspamd_logger.infox(task, '%s [%s]: #words is less then text_part_min_words: %s',
+        rule['symbol'], rule['type'], rule.text_part_min_words)
+      return
+    end
+
     tcp.request({
       task = task,
       host = addr:to_string(),
@@ -1444,7 +1467,7 @@ local function spamassassin_check(task, content, digest, rule)
         -- Parse the response
         if upstream then upstream:ok() end
 
-        lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
+        --lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
 
         --[[
         Spam: False ; 1.1 / 5.0
