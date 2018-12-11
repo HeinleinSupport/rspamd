@@ -408,6 +408,51 @@ local function pyzor_config(opts)
   return nil
 end
 
+local function oletools_config(opts)
+
+  local oletools_conf = {
+    scan_mime_parts = false,
+    scan_text_mime = false,
+    scan_image_mime = false,
+    default_port = 5954,
+    timeout = 15.0,
+    log_clean = false,
+    retransmits = 2,
+    cache_expire = 7200, -- expire redis in one hour
+    message = '${SCANNER}: Oletools threat message found: "${VIRUS}"',
+    detection_category = "hash",
+    default_score = 0.1,
+    action = false,
+  }
+
+  for k,v in pairs(opts) do
+    oletools_conf[k] = v
+  end
+
+  if not oletools_conf.prefix then
+    oletools_conf.prefix = 'rs_av_oletools_'
+  end
+
+  if not oletools_conf['servers'] then
+    rspamd_logger.errx(rspamd_config, 'no servers defined')
+
+    return nil
+  end
+
+  oletools_conf['upstreams'] = upstream_list.create(rspamd_config,
+    oletools_conf['servers'],
+    oletools_conf.default_port)
+
+  if oletools_conf['upstreams'] then
+    return oletools_conf
+  end
+
+  rspamd_logger.errx(rspamd_config, 'cannot parse servers %s',
+    oletools_conf['servers'])
+  return nil
+end
+
+
 local function razor_config(opts)
 
   local razor_conf = {
@@ -544,6 +589,42 @@ local function icap_config(opts)
   return nil
 end
 
+-- just a very simple query limit implementation
+local function query_limit_set (task, digest, rule, query_limit_time)
+
+  local key = digest
+
+  local function redis_set_cb(err)
+    -- Do nothing
+    if err then
+      rspamd_logger.errx(task, 'failed to save query limit entry for %s -> "%s": %s',
+        rule['symbol'], key, err)
+    else
+      lua_util.debugm(N, task, '%s [%s]: saved cached result for %s: %s',
+        rule['symbol'], rule['type'], key, rule['symbol'])
+    end
+  end
+
+  if redis_params then
+    key = rule['prefix'] .. '_ql_' .. key
+
+    rspamd_redis_make_request(task,
+      redis_params, -- connect params
+      key, -- hash key
+      true, -- is write
+      redis_set_cb, --callback
+      'HSET', -- command
+      { rule['prefix'], query_limit_time, '1' }
+    )
+  end
+
+  return false
+
+end
+
+local function query_limit_get (task, rule, limit)
+
+end
 
 local function message_not_too_large(task, content, rule)
   local max_size = tonumber(rule['max_size'])
@@ -1208,8 +1289,6 @@ local function pyzor_check(task, content, digest, rule)
     local addr = upstream:get_addr()
     local retransmits = rule.retransmits
 
-
-
     local function pyzor_callback(err, data, conn)
 
       if err then
@@ -1331,6 +1410,81 @@ local function pyzor_check(task, content, digest, rule)
     end
   end
 end
+
+local function oletools_check(task, content, digest, rule)
+  local function oletools_check_uncached ()
+    local upstream = rule.upstreams:get_upstream_round_robin()
+    local addr = upstream:get_addr()
+    local retransmits = rule.retransmits
+
+    local function oletools_callback(err, data, conn)
+
+      if err then
+
+          -- set current upstream to fail because an error occurred
+          upstream:fail()
+
+          -- retry with another upstream until retransmits exceeds
+          if retransmits > 0 then
+
+            retransmits = retransmits - 1
+
+            -- Select a different upstream!
+            upstream = rule.upstreams:get_upstream_round_robin()
+            addr = upstream:get_addr()
+
+            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+
+            tcp.request({
+              task = task,
+              host = addr:to_string(),
+              port = addr:get_port(),
+              timeout = rule['timeout'],
+              shutdown = true,
+              data = { "CHECK\n" , content },
+              callback = oletools_callback,
+            })
+          else
+            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
+          end
+      else
+        -- Parse the response
+        if upstream then upstream:ok() end
+
+        lua_util.debugm(N, task, 'data: %s', tostring(data))
+        local ucl_parser = ucl.parser()
+        local ok, py_err = ucl_parser:parse_string(tostring(data))
+        if not ok then
+            rspamd_logger.errx(task, "error parsing response: %s", py_err)
+            return
+        end
+
+        local resp = ucl_parser:get_object()
+        lua_util.debugm(N, task, 'parsed_data: %s', resp)
+
+      end
+    end
+
+    tcp.request({
+      task = task,
+      host = addr:to_string(),
+      port = addr:get_port(),
+      timeout = rule['timeout'],
+      shutdown = true,
+      data = { "CHECK\n" , content },
+      callback = oletools_callback,
+    })
+  end
+  if need_av_check(task, content, rule) then
+    if check_av_cache(task, digest, rule, oletools_check_uncached) then
+      return
+    else
+      oletools_check_uncached()
+    end
+  end
+end
+
 
 local function razor_check(task, content, digest, rule)
   local function razor_check_uncached ()
@@ -1653,6 +1807,10 @@ local av_types = {
   pyzor = {
     configure = pyzor_config,
     check = pyzor_check
+  },
+  oletools = {
+    configure = oletools_config,
+    check = oletools_check
   },
   razor = {
     configure = razor_config,
