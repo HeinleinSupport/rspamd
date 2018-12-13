@@ -625,43 +625,6 @@ local function icap_config(opts)
   return nil
 end
 
--- just a very simple query limit implementation
-local function query_limit_set (task, digest, rule, query_limit_time)
-
-  local key = digest
-
-  local function redis_set_cb(err)
-    -- Do nothing
-    if err then
-      rspamd_logger.errx(task, 'failed to save query limit entry for %s -> "%s": %s',
-        rule['symbol'], key, err)
-    else
-      lua_util.debugm(N, task, '%s [%s]: saved cached result for %s: %s',
-        rule['symbol'], rule['type'], key, rule['symbol'])
-    end
-  end
-
-  if redis_params then
-    key = rule['prefix'] .. '_ql_' .. key
-
-    rspamd_redis_make_request(task,
-      redis_params, -- connect params
-      key, -- hash key
-      true, -- is write
-      redis_set_cb, --callback
-      'HSET', -- command
-      { rule['prefix'], query_limit_time, '1' }
-    )
-  end
-
-  return false
-
-end
-
-local function query_limit_get (task, rule, limit)
-
-end
-
 local function message_not_too_large(task, content, rule)
   local max_size = tonumber(rule['max_size'])
   if not max_size then return true end
