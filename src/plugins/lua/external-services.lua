@@ -330,6 +330,7 @@ local function kaspersky_config(opts)
     retransmits = 1, -- use local files, retransmits are useless
     cache_expire = 3600, -- expire redis in one hour
     message = default_message,
+    detection_category = "virus",
     tmpdir = '/tmp',
     prefix = 'rs_ak',
   }
@@ -456,7 +457,8 @@ local function oletools_config(opts)
     retransmits = 2,
     cache_expire = 7200, -- expire redis in one hour
     message = '${SCANNER}: Oletools threat message found: "${VIRUS}"',
-    detection_category = "hash",
+    detection_category = "office macro",
+    oletools_flags = "A.X";
     default_score = 1,
     action = false,
   }
@@ -545,7 +547,7 @@ local function spamassassin_config(opts)
     retransmits = 2,
     cache_expire = 7200, -- expire redis in one hour
     message = '${SCANNER}: Spamassassin bulk message found: "${VIRUS}"',
-    detection_category = "hash",
+    detection_category = "spam",
     default_score = 1,
     action = false,
     symbol = "SPAMD_V",
@@ -592,7 +594,7 @@ local function icap_config(opts)
     retransmits = 2,
     cache_expire = 7200, -- expire redis in one hour
     message = '${SCANNER}: threat found with icap scanner: "${VIRUS}"',
-    detection_category = "hash",
+    detection_category = "virus",
     default_score = 1,
     action = false,
     symbol = "ICAP_V",
