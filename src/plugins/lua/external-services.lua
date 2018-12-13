@@ -421,7 +421,7 @@ local function oletools_config(opts)
     cache_expire = 7200, -- expire redis in one hour
     message = '${SCANNER}: Oletools threat message found: "${VIRUS}"',
     detection_category = "hash",
-    default_score = 0.1,
+    default_score = 1,
     action = false,
   }
 
@@ -1441,7 +1441,8 @@ local function oletools_check(task, content, digest, rule)
               port = addr:get_port(),
               timeout = rule['timeout'],
               shutdown = true,
-              data = { "CHECK\n" , content },
+              --data = { "CHECK\n" , content },
+              data = content,
               callback = oletools_callback,
             })
           else
@@ -1452,17 +1453,40 @@ local function oletools_check(task, content, digest, rule)
         -- Parse the response
         if upstream then upstream:ok() end
 
+        data = tostring(data)
         lua_util.debugm(N, task, 'data: %s', tostring(data))
-        local ucl_parser = ucl.parser()
-        local ok, py_err = ucl_parser:parse_string(tostring(data))
-        if not ok then
-            rspamd_logger.errx(task, "error parsing response: %s", py_err)
-            return
+
+        local lines = rspamd_str_split(data, "\r\n")
+
+        lua_util.debugm(N, task, '%s [%s]: line6: %s', rule['symbol'], rule['type'], lines[6])
+        lua_util.debugm(N, task, '%s [%s]: line7: %s', rule['symbol'], rule['type'], lines[7])
+
+        local threat_string = {}
+
+        local flag_line = lines[6] or ''
+        local flags
+        local matches
+        if string.find(flag_line, 'SUSPICIOUS') then
+          -- SUSPICIOUS|AWX  |OLE:|49574.1544728465.877461
+          local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|OLE:%|.*)"
+          local flags_string = string.gsub(flag_line, pattern_symbols, "%2")
+          lua_util.debugm(N, task, '%s [%s]: flags: |%s|', rule['symbol'], rule['type'], flags_string)
+          flags = string.match(flags_string, rule.oletools_flags)
+          lua_util.debugm(N, task, '%s [%s]: flags: |%s|', rule['symbol'], rule['type'], flags)
         end
-
-        local resp = ucl_parser:get_object()
-        lua_util.debugm(N, task, 'parsed_data: %s', resp)
-
+        local matches_line = lines[7] or ''
+        if string.find(matches_line, 'Matches') then
+          --           |     |    |Matches: ['Document_open', 'copyfile', 'CreateObject']
+          local pattern_symbols = "(.*Matches: %[)(.*)(%].*)"
+          matches = string.gsub(matches_line, pattern_symbols, "%2")
+          lua_util.debugm(N, task, '%s [%s]: matches: |%s|', rule['symbol'], rule['type'], matches)
+        end
+        if flags ~= nil then
+          lua_util.debugm(N, task, '%s [%s]: threat_string: |%s|', rule['symbol'], rule['type'], flags .. ' - ' .. matches)
+          table.insert(threat_string, flags .. ' - ' .. matches)
+          yield_result(task, rule, threat_string, rule.default_score)
+          save_av_cache(task, digest, rule, threat_string, rule.default_score)
+        end
       end
     end
 
@@ -1472,7 +1496,8 @@ local function oletools_check(task, content, digest, rule)
       port = addr:get_port(),
       timeout = rule['timeout'],
       shutdown = true,
-      data = { "CHECK\n" , content },
+      --data = { "CHECK\n" , content },
+      data = content,
       callback = oletools_callback,
     })
   end
@@ -1732,6 +1757,7 @@ local function icap_check(task, content, digest, rule)
       else
         -- set upstream ok
         if upstream then upstream:ok() end
+
         -- Parse the response
         local header = tostring(data)
         local threat_string = {}
@@ -1756,7 +1782,7 @@ local function icap_check(task, content, digest, rule)
             end
         end
 
-        if threat_string ~= "" then
+        if #threat_string >= 1 then
           yield_result(task, rule, threat_string, rule.default_score)
           save_av_cache(task, digest, rule, threat_string, rule.default_score)
         end
@@ -1768,6 +1794,7 @@ local function icap_check(task, content, digest, rule)
       host = addr:to_string(),
       port = addr:get_port(),
       timeout = rule['timeout'],
+      stop_pattern = '\r\n',
       data = request_data,
       shutdown = true,
       callback = icap_callback,
