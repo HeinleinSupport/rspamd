@@ -331,6 +331,7 @@ local function kaspersky_config(opts)
     cache_expire = 3600, -- expire redis in one hour
     message = default_message,
     detection_category = "virus",
+    default_score = 1,
     tmpdir = '/tmp',
     prefix = 'rs_ak',
   }
@@ -414,7 +415,7 @@ local function pyzor_config(opts)
     cache_expire = 7200, -- expire redis in one hour
     message = '${SCANNER}: Pyzor bulk message found: "${VIRUS}"',
     detection_category = "hash",
-    default_score = 0.1,
+    default_score = 1,
     action = false,
   }
 
@@ -1386,15 +1387,27 @@ local function dcc_check(task, content, digest, rule)
             task:insert_result(rule['symbol_fail'], 0.0, 'DCC returned a temporary failure result:' .. result)
           elseif result == 'A' then
             -- do nothing
-            lua_util.debugm(N, task, '%s [%s]: returned result A - info: %s', rule['symbol'], rule['type'], info)
+            if rule.log_clean then
+              rspamd_logger.infox(task, '%s [%s]: clean, returned result A - info: %s', rule['symbol'], rule['type'], info)
+            else
+              lua_util.debugm(N, task, '%s [%s]: returned result A - info: %s', rule['symbol'], rule['type'], info)
+            end
             save_av_cache(task, digest, rule, 'OK')
           elseif result == 'G' then
             -- do nothing
-            lua_util.debugm(N, task, '%s [%s]: returned result G - info: %s', rule['symbol'], rule['type'], info)
+            if rule.log_clean then
+              rspamd_logger.infox(task, '%s [%s]: clean, returned result G - info: %s', rule['symbol'], rule['type'], info)
+            else
+              lua_util.debugm(N, task, '%s [%s]: returned result G - info: %s', rule['symbol'], rule['type'], info)
+            end
             save_av_cache(task, digest, rule, 'OK')
           elseif result == 'S' then
             -- do nothing
-            lua_util.debugm(N, task, '%s [%s]: returned result S - info: %s', rule['symbol'], rule['type'], info)
+            if rule.log_clean then
+              rspamd_logger.infox(task, '%s [%s]: clean, returned result S - info: %s', rule['symbol'], rule['type'], info)
+            else
+              lua_util.debugm(N, task, '%s [%s]: returned result S - info: %s', rule['symbol'], rule['type'], info)
+            end
             save_av_cache(task, digest, rule, 'OK')
           else
             -- Unknown result
@@ -1465,7 +1478,7 @@ local function pyzor_check(task, content, digest, rule)
         -- Parse the response
         if upstream then upstream:ok() end
 
-        lua_util.debugm(N, task, 'data: %s', tostring(data))
+        lua_util.debugm(N, task, '%s [%s]: returned data: %s', rule['symbol'], rule['type'], tostring(data))
         local ucl_parser = ucl.parser()
         local ok, py_err = ucl_parser:parse_string(tostring(data))
         if not ok then
@@ -1477,7 +1490,7 @@ local function pyzor_check(task, content, digest, rule)
         local whitelisted = tonumber(resp["WL-Count"])
         local reported = tonumber(resp["Count"])
 
-        rspamd_logger.infox(task, "%s - count=%s wl=%s", addr:to_string(), reported, whitelisted)
+        --rspamd_logger.infox(task, "%s - count=%s wl=%s", addr:to_string(), reported, whitelisted)
 
         --[[
         @todo: Implement math function to calc the score dynamically based on return values. Maybe check spamassassin implementation.
@@ -1520,7 +1533,11 @@ local function pyzor_check(task, content, digest, rule)
           yield_result(task, rule, threat_string, weight)
           save_av_cache(task, digest, rule, threat_string, weight)
         else
-          lua_util.debugm(N, task, '%s [%s]: returned result is ham - info: %s', rule['symbol'], rule['type'], info)
+          if rule.log_clean then
+            rspamd_logger.infox(task, '%s [%s]: clean, returned result is ham - info: %s', rule['symbol'], rule['type'], info)
+          else
+            lua_util.debugm(N, task, '%s [%s]: returned result is ham - info: %s', rule['symbol'], rule['type'], info)
+          end
           save_av_cache(task, digest, rule, 'OK', weight)
         end
 
@@ -1602,31 +1619,72 @@ local function oletools_check(task, content, digest, rule)
         lua_util.debugm(N, task, '%s [%s]: line6: %s', rule['symbol'], rule['type'], lines[6])
         lua_util.debugm(N, task, '%s [%s]: line7: %s', rule['symbol'], rule['type'], lines[7])
 
-        local threat_string = {}
-
         local flag_line = lines[6] or ''
+        local matches_line = lines[7] or ''
+        local error_line = lines[8] or ''
+        local error_line2 = lines[9] or ''
         local flags
         local matches
         if string.find(flag_line, 'SUSPICIOUS') then
           -- SUSPICIOUS|AWX  |OLE:|49574.1544728465.877461
           local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|OLE:%|.*)"
           local flags_string = string.gsub(flag_line, pattern_symbols, "%2")
-          lua_util.debugm(N, task, '%s [%s]: flags: |%s|', rule['symbol'], rule['type'], flags_string)
+          lua_util.debugm(N, task, '%s [%s]: flags_returned: |%s|', rule['symbol'], rule['type'], flags_string)
           flags = string.match(flags_string, rule.oletools_flags)
           lua_util.debugm(N, task, '%s [%s]: flags: |%s|', rule['symbol'], rule['type'], flags)
+
+          if string.find(matches_line, 'Matches') then
+            --           |     |    |Matches: ['Document_open', 'copyfile', 'CreateObject']
+            local pattern_matches = "(.*Matches: %[)(.*)(%].*)"
+            matches = string.gsub(matches_line, pattern_matches, "%2")
+            matches = string.gsub(matches, "[%s%']", "")
+            lua_util.debugm(N, task, '%s [%s]: matches: |%s|', rule['symbol'], rule['type'], matches)
+          end
+        elseif string.find(flag_line, 'ERROR') then
+
+          -- MacroRaptor 0.53 - http://decalage.info/python/oletools
+          -- This is work in progress, please report issues at https://github.com/decalage2/oletools/issues
+          -- ----------+-----+----+--------------------------------------------------------
+          -- Result    |Flags|Type|File
+          -- ----------+-----+----+--------------------------------------------------------
+          -- ERROR     |     |??? |/tmp/oletools//1545021249.743918.30108
+          --           |     |    |Failed to open file
+          --           |     |    |/tmp/oletools//1545021249.743918.30108 is RTF, need to
+          --           |     |    |run rtfobj.py and find VBA Macros in its output.
+          -- Flags: A=AutoExec, W=Write, X=Execute
+
+          -- MacroRaptor 0.53 - http://decalage.info/python/oletools
+          -- This is work in progress, please report issues at https://github.com/decalage2/oletools/issues
+          -- ----------+-----+----+--------------------------------------------------------
+          -- Result    |Flags|Type|File
+          -- ----------+-----+----+--------------------------------------------------------
+          -- ERROR     |     |??? |/tmp/oletools//1545028202.5934522.28846
+          --           |     |    |Failed to open file
+          --           |     |    |/tmp/oletools//1545028202.5934522.28846 is not a
+          --           |     |    |supported file type, cannot extract VBA Macros.
+
+          local pattern_symbols = "( *%| *%| *%|)(.*)$"
+          local error_string = string.gsub(error_line, pattern_symbols, "%2")
+          local error_string2 = string.gsub(error_line2, pattern_symbols, "%2")
+          lua_util.debugm(N, task, '%s [%s]: ERROR: %s %s', rule['symbol'], rule['type'], error_string, error_string2)
+          rspamd_logger.warnx(task, '%s [%s]: oletools returned ERROR', rule['symbol'], rule['type'])
+        elseif rule.log_clean and string.find(flag_line, 'No Macro') then
+          rspamd_logger.infox(task, '%s [%s]: clean, document has no macro', rule['symbol'], rule['type'])
+        elseif rule.log_clean and string.find(flag_line, 'Macro OK') then
+          rspamd_logger.infox(task, '%s [%s]: clean, document has macro, but nothing suspicious', rule['symbol'], rule['type'])
+        else
+          rspamd_logger.warnx(task, '%s [%s]: unhandled response', rule['symbol'], rule['type'])
         end
-        local matches_line = lines[7] or ''
-        if string.find(matches_line, 'Matches') then
-          --           |     |    |Matches: ['Document_open', 'copyfile', 'CreateObject']
-          local pattern_symbols = "(.*Matches: %[)(.*)(%].*)"
-          matches = string.gsub(matches_line, pattern_symbols, "%2")
-          lua_util.debugm(N, task, '%s [%s]: matches: |%s|', rule['symbol'], rule['type'], matches)
-        end
+
         if flags ~= nil then
           lua_util.debugm(N, task, '%s [%s]: threat_string: |%s|', rule['symbol'], rule['type'], flags .. ' - ' .. matches)
-          table.insert(threat_string, flags .. ' - ' .. matches)
-          yield_result(task, rule, threat_string, rule.default_score)
-          save_av_cache(task, digest, rule, threat_string, rule.default_score)
+          local threat_table = {flags}
+          local matches_table = rspamd_str_split(matches, ",")
+          for _,m in ipairs(matches_table) do
+            table.insert(threat_table, m)
+          end
+          yield_result(task, rule, threat_table, rule.default_score)
+          save_av_cache(task, digest, rule, threat_table, rule.default_score)
         end
       end
     end
@@ -1657,8 +1715,6 @@ local function razor_check(task, content, digest, rule)
     local upstream = rule.upstreams:get_upstream_round_robin()
     local addr = upstream:get_addr()
     local retransmits = rule.retransmits
-
-
 
     local function razor_callback(err, data, conn)
 
@@ -1707,7 +1763,11 @@ local function razor_check(task, content, digest, rule)
           yield_result(task, rule, threat_string, rule.default_score)
           save_av_cache(task, digest, rule, threat_string, rule.default_score)
         elseif threat_string == "ham" then
-          lua_util.debugm(N, task, '%s [%s]: returned result is ham', rule['symbol'], rule['type'])
+          if rule.log_clean then
+            rspamd_logger.infox(task, '%s [%s]: returned result is ham', rule['symbol'], rule['type'])
+          else
+            lua_util.debugm(N, task, '%s [%s]: returned result is ham', rule['symbol'], rule['type'])
+          end
           save_av_cache(task, digest, rule, 'OK', rule.default_score)
         else
           rspamd_logger.errx(task,"%s - unknown response from razorsocket: %s", addr:to_string(), threat_string)
@@ -1821,6 +1881,12 @@ local function spamassassin_check(task, content, digest, rule)
 
           yield_result(task, rule, symbols_table, spam_score)
           save_av_cache(task, digest, rule, symbols_table, spam_score)
+        else
+          if rule.log_clean then
+            rspamd_logger.infox(task, '%s [%s]: clean, no spam detected', rule['symbol'], rule['type'])
+          else
+            lua_util.debugm(N, task, '%s [%s]: no spam detected - spam score: %s, symbols: %s', rule['symbol'], rule['type'], spam_score, symbols)
+          end
         end
       end
     end
@@ -2078,7 +2144,7 @@ local function add_external_services_rule(sym, opts)
       return false
     end
     if not patterns[1] then
-      lua_util.debugm(N, task, '%s [%s]: in not pattern[1]', rule['symbol'], rule['type'])
+      --lua_util.debugm(N, task, '%s [%s]: in not pattern[1]', rule['symbol'], rule['type'])
       for _, pat in pairs(patterns) do
         if pat:match(found) then
           return true
@@ -2125,11 +2191,11 @@ local function add_external_services_rule(sym, opts)
         --lua_util.debugm(N, task, '%s [%s]: mime_parts_filter_regex: %s', rule['symbol'], rule['type'], rule['mime_parts_filter_regex'])
         --lua_util.debugm(N, task, '%s [%s]: fname: %s', rule['symbol'], rule['type'], fname)
         if fname ~= nil then
-          lua_util.debugm(N, task, '%s [%s]: fname not nil - %s', rule['symbol'], rule['type'], fname)
-          lua_util.debugm(N, task, '%s [%s]: fname not nil match - %s', rule['symbol'], rule['type'], match_filter(task, fname, rule['mime_parts_filter_regex']))
+          --lua_util.debugm(N, task, '%s [%s]: fname not nil - %s', rule['symbol'], rule['type'], fname)
+          --lua_util.debugm(N, task, '%s [%s]: fname not nil match - %s', rule['symbol'], rule['type'], match_filter(task, fname, rule['mime_parts_filter_regex']))
           ext,ext2,part_table = gen_extension(fname)
           lua_util.debugm(N, task, '%s [%s]: extension found: %s - 2.ext: %s - parts: %s', rule['symbol'], rule['type'], ext, ext2, part_table)
-          if match_filter(task, ext, rule['mime_parts_filter_ext']) then
+          if match_filter(task, ext, rule['mime_parts_filter_ext']) or match_filter(task, ext2, rule['mime_parts_filter_ext']) then
             lua_util.debugm(N, task, '%s [%s]: extension matched: %s', rule['symbol'], rule['type'], ext)
             extension_check = true
           end
