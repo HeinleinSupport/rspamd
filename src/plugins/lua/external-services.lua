@@ -1918,18 +1918,85 @@ local function icap_check(task, content, digest, rule)
     -- Build the icap query
     --lua_util.debugm(N, task, '%s [%s]: size: %s - %s', rule['symbol'], rule['type'], tonumber(task:get_size()), string.format('%02X', string.byte(task:get_size())))
     local size = string.format("%x", tonumber(#content))
-    local request_data = {
+    local respond_request = {
       "RESPMOD icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rule.scheme .. " ICAP/1.0\r\n",
       "Encapsulated: res-body=0\r\n",
       "\r\n",
       size .. "\r\n",
       content,
-      "\r\n0\r\n",
+      "\r\n0\r\n\r\n",
     }
-    --lua_util.debugm(N, task, '%s [%s]: get_content: %s', rule['symbol'], rule['type'], task:get_content())
-    --lua_util.debugm(N, task, '%s [%s]: request_data: %s', rule['symbol'], rule['type'], request_data)
+    lua_util.debugm(N, task, '%s [%s]: addr: |%s|%s|', rule['symbol'], rule['type'], addr:to_string(), addr:get_port())
+    local options_request = {
+      "OPTIONS icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rule.scheme .. " ICAP/1.0\r\n",
+      "Host:" .. addr:to_string() .. "\r\n",
+      "User-Agent: Rspamd\r\n",
+      "Encapsulated: null-body=0\r\n\r\n",
+    }
 
-    local function icap_callback(err, data, conn)
+    local function icap_parse_result(result)
+
+      -- Parse the response
+      local threat_string = {}
+      lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], result)
+
+      --[[
+        X-Virus-ID: Troj/DocDl-OYC
+        X-Infection-Found: Type=0; Resolution=2; Threat=Troj/DocDl-OYC;
+        X-Infection-Found: Type=0; Resolution=2; Threat=W97M.Downloader;
+      ]] --
+      for s in result:gmatch("[^\r\n]+") do
+          if string.find(s, 'X%-Virus%-ID') then
+            local pattern_symbols = "(X%-Virus%-ID: )(.*)"
+            local match = string.gsub(s, pattern_symbols, "%2")
+            lua_util.debugm(N, task, '%s [%s]: icap X-Virus-ID: %s', rule['symbol'], rule['type'], match)
+            table.insert(threat_string, match)
+          end
+          if string.find(s, 'X%-Infection%-Found') then
+            local pattern_symbols = "(X%-Infection%-Found: Type%=0; .* Threat%=)(.*)(;)"
+            local match = string.gsub(s, pattern_symbols, "%2")
+            lua_util.debugm(N, task, '%s [%s]: icap X-Infection-Found: %s', rule['symbol'], rule['type'], match)
+            table.insert(threat_string, match)
+          end
+      end
+
+      if #threat_string >= 1 then
+        yield_result(task, rule, threat_string, rule.default_score)
+        save_av_cache(task, digest, rule, threat_string, rule.default_score)
+      end
+    end
+
+    local function icap_r_respond_cb(err, data, conn)
+      local result = tostring(data)
+      lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
+      lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
+      conn:close()
+      if string.find(result, 'ICAP%/1%.0 200 OK') then
+        icap_parse_result(result)
+      else
+        lua_util.debugm(N, task, '%s [%s]: OPTIONS: No OK in return: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
+      end
+    end
+
+    local function icap_w_respond_cb(err, conn)
+      conn:add_read(icap_r_respond_cb, '\r\n\r\n')
+      lua_util.debugm(N, task, '%s [%s]: icap_w_respond_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
+    end
+
+    local function icap_r_options_cb(err, data, conn)
+      local result = tostring(data)
+      lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
+      lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ""))
+      if string.find(result, 'ICAP%/1%.0 200 OK') then
+        conn:add_write(icap_w_respond_cb, respond_request)
+      else
+        lua_util.debugm(N, task, '%s [%s]: OPTIONS: No OK in return: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ""))
+      end
+    end
+
+    local function icap_callback(err, conn)
+
+      lua_util.debugm(N, task, '%s [%s]: Callback result: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
 
       if err then
 
@@ -1952,60 +2019,39 @@ local function icap_check(task, content, digest, rule)
               host = addr:to_string(),
               port = addr:get_port(),
               timeout = rule['timeout'],
-              data = request_data,
-              shutdown = true,
-              callback = icap_callback,
               stop_pattern = '\r\n',
+              data = options_request,
+              read = false,
+              callback = icap_callback,
             })
           else
             rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
+        lua_util.debugm(N, task, '%s [%s]: connect result: |%s|', rule['symbol'], rule['type'], conn)
+        --conn:add_write(icap_w_options_cb, options_request)
+        conn:add_read(icap_r_options_cb, '\r\n\r\n')
+        lua_util.debugm(N, task, '%s [%s]: icap_w_options_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
+
         -- set upstream ok
         if upstream then upstream:ok() end
-
-        -- Parse the response
-        local header = tostring(data)
-        local threat_string = {}
-        lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], header)
-
-        --[[
-          X-Virus-ID: Troj/DocDl-OYC
-          X-Infection-Found: Type=0; Resolution=2; Threat=Troj/DocDl-OYC;
-        ]] --
-        for s in header:gmatch("[^\r\n]+") do
-            if string.find(s, 'X%-Virus%-ID') then
-              local pattern_symbols = "(X%-Virus%-ID: )(.*)"
-              local match = string.gsub(s, pattern_symbols, "%2")
-              lua_util.debugm(N, task, '%s [%s]: icap X-Virus-ID: %s', rule['symbol'], rule['type'], match)
-              table.insert(threat_string, match)
-            end
-            if string.find(s, 'X%-Infection%-Found') then
-              local pattern_symbols = "(X%-Infection%-Found: Type%=0; Resolution%=2; Threat%=)(.*)(;)"
-              local match = string.gsub(s, pattern_symbols, "%2")
-              lua_util.debugm(N, task, '%s [%s]: icap X-Infection-Found: %s', rule['symbol'], rule['type'], match)
-              table.insert(threat_string, match)
-            end
-        end
-
-        if #threat_string >= 1 then
-          yield_result(task, rule, threat_string, rule.default_score)
-          save_av_cache(task, digest, rule, threat_string, rule.default_score)
-        end
       end
     end
 
+    lua_util.debugm(N, task, '%s [%s]: before request', rule['symbol'], rule['type'])
     tcp.request({
       task = task,
       host = addr:to_string(),
       port = addr:get_port(),
       timeout = rule['timeout'],
       stop_pattern = '\r\n',
-      data = request_data,
-      shutdown = true,
+      data = options_request,
+      read = false,
       callback = icap_callback,
     })
+
+    --lua_util.debugm(N, task, '%s [%s]: after request: |%s|', rule['symbol'], rule['type'])
   end
   if need_av_check(task, content, rule) then
     if check_av_cache(task, digest, rule, icap_check_uncached) then
@@ -2220,6 +2266,8 @@ local function add_external_services_rule(sym, opts)
 
       fun.each(function(p)
         local content = p:get_content()
+        --local length = p:get_raw_length()
+        --lua_util.debugm(N, task, '%s [%s]: mime_part length : %s', rule['symbol'], rule['type'], length)
         if content and #content > 0 then
           cfg.check(task, content, p:get_digest(), rule)
         end
