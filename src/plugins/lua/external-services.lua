@@ -653,10 +653,10 @@ local function check_av_cache(task, digest, rule, fn)
       local threat_string = rspamd_str_split(data[1], '\v')
       local score = data[2] or rule.default_score
       if threat_string[1] ~= 'OK' then
-        lua_util.debugm(N, task, 'got cached threat result for %s: %s', key, threat_string[1])
+        lua_util.debugm(N, task, '%s [%s]: got cached threat result for %s: %s', rule['symbol'], rule['type'], key, threat_string[1])
         yield_result(task, rule, threat_string, score)
       else
-        lua_util.debugm(N, task, 'got cached negative result for %s: %s', key, threat_string[1])
+        lua_util.debugm(N, task, '%s [%s]: got cached negative result for %s: %s', rule['symbol'], rule['type'], key, threat_string[1])
       end
     else
       if err then
@@ -1938,7 +1938,7 @@ local function icap_check(task, content, digest, rule)
 
       -- Parse the response
       local threat_string = {}
-      lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], result)
+      lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
 
       --[[
         X-Virus-ID: Troj/DocDl-OYC
@@ -1968,10 +1968,10 @@ local function icap_check(task, content, digest, rule)
 
     local function icap_r_respond_cb(err, data, conn)
       local result = tostring(data)
-      lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
-      lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
+      --lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
+      --lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
       conn:close()
-      if string.find(result, 'ICAP%/1%.0 200 OK') then
+      if string.find(result, 'ICAP%/1%.0') then
         icap_parse_result(result)
       else
         lua_util.debugm(N, task, '%s [%s]: OPTIONS: No OK in return: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
@@ -1980,13 +1980,13 @@ local function icap_check(task, content, digest, rule)
 
     local function icap_w_respond_cb(err, conn)
       conn:add_read(icap_r_respond_cb, '\r\n\r\n')
-      lua_util.debugm(N, task, '%s [%s]: icap_w_respond_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
+      --lua_util.debugm(N, task, '%s [%s]: icap_w_respond_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
     end
 
     local function icap_r_options_cb(err, data, conn)
       local result = tostring(data)
-      lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
-      lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ""))
+      --lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
+      --lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ""))
       if string.find(result, 'ICAP%/1%.0 200 OK') then
         conn:add_write(icap_w_respond_cb, respond_request)
       else
@@ -1995,8 +1995,6 @@ local function icap_check(task, content, digest, rule)
     end
 
     local function icap_callback(err, conn)
-
-      lua_util.debugm(N, task, '%s [%s]: Callback result: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
 
       if err then
 
@@ -2029,17 +2027,15 @@ local function icap_check(task, content, digest, rule)
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
-        lua_util.debugm(N, task, '%s [%s]: connect result: |%s|', rule['symbol'], rule['type'], conn)
-        --conn:add_write(icap_w_options_cb, options_request)
+        --lua_util.debugm(N, task, '%s [%s]: connect result: |%s|', rule['symbol'], rule['type'], conn)
         conn:add_read(icap_r_options_cb, '\r\n\r\n')
-        lua_util.debugm(N, task, '%s [%s]: icap_w_options_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
+        --lua_util.debugm(N, task, '%s [%s]: icap_w_options_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
 
         -- set upstream ok
         if upstream then upstream:ok() end
       end
     end
 
-    lua_util.debugm(N, task, '%s [%s]: before request', rule['symbol'], rule['type'])
     tcp.request({
       task = task,
       host = addr:to_string(),
