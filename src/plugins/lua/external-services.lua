@@ -163,12 +163,14 @@ local function clamav_config(opts)
     default_score = 1,
   }
 
-  for k,v in pairs(opts) do
-    clamav_conf[k] = v
-  end
+  clamav_conf = lua_util.override_defaults(clamav_conf, opts)
 
   if not clamav_conf.prefix then
-    clamav_conf.prefix = 'rs_av_clamav_'
+    clamav_conf.prefix = 'rs_av_' .. clamav_conf.name .. '_'
+  end
+
+  if not clamav_conf.log_prefix then
+    clamav_conf.log_prefix = clamav_conf.name .. ' (' .. clamav_conf.type .. ')'
   end
 
   if not clamav_conf['servers'] then
@@ -205,12 +207,14 @@ local function fprot_config(opts)
     default_score = 1,
   }
 
-  for k,v in pairs(opts) do
-    fprot_conf[k] = v
-  end
+  fprot_conf = lua_util.override_defaults(fprot_conf, opts)
 
   if not fprot_conf.prefix then
-    fprot_conf.prefix = 'rs_av_fprot_'
+    fprot_conf.prefix = 'rs_av_' .. fprot_conf.name .. '_'
+  end
+
+  if not fprot_conf.log_prefix then
+    fprot_conf.log_prefix = fprot_conf.name .. ' (' .. fprot_conf.type .. ')'
   end
 
   if not fprot_conf['servers'] then
@@ -249,12 +253,14 @@ local function sophos_config(opts)
     savdi_report_oversize = false,
   }
 
-  for k,v in pairs(opts) do
-    sophos_conf[k] = v
-  end
+  sophos_conf = lua_util.override_defaults(sophos_conf, opts)
 
   if not sophos_conf.prefix then
-    sophos_conf.prefix = 'rs_av_sophos_'
+    sophos_conf.prefix = 'rs_av_' .. sophos_conf.name .. '_'
+  end
+
+  if not sophos_conf.log_prefix then
+    sophos_conf.log_prefix = sophos_conf.name .. ' (' .. sophos_conf.type .. ')'
   end
 
   if not sophos_conf['servers'] then
@@ -292,12 +298,14 @@ local function savapi_config(opts)
     default_score = 1,
   }
 
-  for k,v in pairs(opts) do
-    savapi_conf[k] = v
-  end
+  savapi_conf = lua_util.override_defaults(savapi_conf, opts)
 
   if not savapi_conf.prefix then
-    savapi_conf.prefix = 'rs_av_avira_'
+    savapi_conf.prefix = 'rs_av_' .. savapi_conf.name .. '_'
+  end
+
+  if not savapi_conf.log_prefix then
+    savapi_conf.log_prefix = savapi_conf.name .. ' (' .. savapi_conf.type .. ')'
   end
 
   if not savapi_conf['servers'] then
@@ -333,10 +341,17 @@ local function kaspersky_config(opts)
     detection_category = "virus",
     default_score = 1,
     tmpdir = '/tmp',
-    prefix = 'rs_ak',
   }
 
   kaspersky_conf = lua_util.override_defaults(kaspersky_conf, opts)
+
+  if not kaspersky_conf.prefix then
+    kaspersky_conf.prefix = 'rs_av_' .. kaspersky_conf.name .. '_'
+  end
+
+  if not kaspersky_conf.log_prefix then
+    kaspersky_conf.log_prefix = kaspersky_conf.name .. ' (' .. kaspersky_conf.type .. ')'
+  end
 
   if not kaspersky_conf['servers'] then
     rspamd_logger.errx(rspamd_config, 'no servers defined')
@@ -374,12 +389,14 @@ local function dcc_config(opts)
     client = '0.0.0.0',
   }
 
-  for k,v in pairs(opts) do
-    dcc_conf[k] = v
-  end
+  dcc_conf = lua_util.override_defaults(dcc_conf, opts)
 
   if not dcc_conf.prefix then
-    dcc_conf.prefix = 'rs_av_dcc_'
+    dcc_conf.prefix = 'rs_av_' .. dcc_conf.name .. '_'
+  end
+
+  if not dcc_conf.log_prefix then
+    dcc_conf.log_prefix = dcc_conf.name .. ' (' .. dcc_conf.type .. ')'
   end
 
   if not dcc_conf['servers'] then
@@ -419,12 +436,14 @@ local function pyzor_config(opts)
     action = false,
   }
 
-  for k,v in pairs(opts) do
-    pyzor_conf[k] = v
-  end
+  pyzor_conf = lua_util.override_defaults(pyzor_conf, opts)
 
   if not pyzor_conf.prefix then
-    pyzor_conf.prefix = 'rs_av_pyzor_'
+    pyzor_conf.prefix = 'rs_av_' .. pyzor_conf.name .. '_'
+  end
+
+  if not pyzor_conf.log_prefix then
+    pyzor_conf.log_prefix = pyzor_conf.name .. ' (' .. pyzor_conf.type .. ')'
   end
 
   if not pyzor_conf['servers'] then
@@ -464,12 +483,14 @@ local function oletools_config(opts)
     action = false,
   }
 
-  for k,v in pairs(opts) do
-    oletools_conf[k] = v
-  end
+  oletools_conf = lua_util.override_defaults(oletools_conf, opts)
 
   if not oletools_conf.prefix then
-    oletools_conf.prefix = 'rs_av_oletools_'
+    oletools_conf.prefix = 'rs_av_' .. oletools_conf.name .. '_'
+  end
+
+  if not oletools_conf.log_prefix then
+    oletools_conf.log_prefix = oletools_conf.name .. ' (' .. oletools_conf.type .. ')'
   end
 
   if not oletools_conf['servers'] then
@@ -509,12 +530,14 @@ local function razor_config(opts)
     action = false,
   }
 
-  for k,v in pairs(opts) do
-    razor_conf[k] = v
-  end
+  razor_conf = lua_util.override_defaults(razor_conf, opts)
 
   if not razor_conf.prefix then
-    razor_conf.prefix = 'rs_av_razor_'
+    razor_conf.prefix = 'rs_av_' .. razor_conf.name .. '_'
+  end
+
+  if not razor_conf.log_prefix then
+    razor_conf.log_prefix = razor_conf.name .. ' (' .. razor_conf.type .. ')'
   end
 
   if not razor_conf['servers'] then
@@ -554,12 +577,14 @@ local function spamassassin_config(opts)
     symbol = "SPAMD_V",
   }
 
-  for k,v in pairs(opts) do
-    spamassassin_conf[k] = v
-  end
+  spamassassin_conf = lua_util.override_defaults(spamassassin_conf, opts)
 
   if not spamassassin_conf.prefix then
-    spamassassin_conf.prefix = 'rs_av_spamd_'
+    spamassassin_conf.prefix = 'rs_av_' .. spamassassin_conf.name .. '_'
+  end
+
+  if not spamassassin_conf.log_prefix then
+    spamassassin_conf.log_prefix = spamassassin_conf.name .. ' (' .. spamassassin_conf.type .. ')'
   end
 
   if not spamassassin_conf['servers'] then
@@ -601,12 +626,14 @@ local function icap_config(opts)
     symbol = "ICAP_V",
   }
 
-  for k,v in pairs(opts) do
-    icap_conf[k] = v
-  end
+  icap_conf = lua_util.override_defaults(icap_conf, opts)
 
   if not icap_conf.prefix then
-    icap_conf.prefix = 'rs_av_icap_'
+    icap_conf.prefix = 'rs_av_' .. icap_conf.name .. '_'
+  end
+
+  if not icap_conf.log_prefix then
+    icap_conf.log_prefix = icap_conf.name .. ' (' .. icap_conf.type .. ')'
   end
 
   if not icap_conf['servers'] then
@@ -653,10 +680,10 @@ local function check_av_cache(task, digest, rule, fn)
       local threat_string = rspamd_str_split(data[1], '\v')
       local score = data[2] or rule.default_score
       if threat_string[1] ~= 'OK' then
-        lua_util.debugm(N, task, '%s [%s]: got cached threat result for %s: %s', rule['symbol'], rule['type'], key, threat_string[1])
+        lua_util.debugm(N, task, '%s: got cached threat result for %s: %s', rule.log_prefix, key, threat_string[1])
         yield_result(task, rule, threat_string, score)
       else
-        lua_util.debugm(N, task, '%s [%s]: got cached negative result for %s: %s', rule['symbol'], rule['type'], key, threat_string[1])
+        lua_util.debugm(N, task, '%s: got cached negative result for %s: %s', rule.log_prefix, key, threat_string[1])
       end
     else
       if err then
@@ -694,7 +721,7 @@ local function save_av_cache(task, digest, rule, to_save, score)
       rspamd_logger.errx(task, 'failed to save virus cache for %s -> "%s": %s',
         to_save, key, err)
     else
-      lua_util.debugm(N, task, '%s [%s]: saved cached result for %s: %s', rule['symbol'], rule['type'], key, to_save)
+      lua_util.debugm(N, task, '%s: saved cached result for %s: %s', rule.log_prefix, key, to_save)
     end
   end
 
@@ -745,7 +772,7 @@ local function fprot_check(task, content, digest, rule)
           upstream = rule.upstreams:get_upstream_round_robin()
           addr = upstream:get_addr()
 
-          lua_util.debugm(N, task, '%s [%s]: retry IP: %s', rule['symbol'], rule['type'], addr)
+          lua_util.debugm(N, task, '%s: retry IP: %s', rule.log_prefix, addr)
 
           tcp.request({
             task = task,
@@ -757,7 +784,7 @@ local function fprot_check(task, content, digest, rule)
             stop_pattern = '\n'
           })
         else
-          rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+          rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
           task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
         end
       else
@@ -768,7 +795,7 @@ local function fprot_check(task, content, digest, rule)
         if clean then
           cached = 'OK'
           if rule['log_clean'] then
-            rspamd_logger.infox(task, '%s [%s]: message or mime_part is clean', rule['symbol'], rule['type'])
+            rspamd_logger.infox(task, '%s: message or mime_part is clean', rule['symbol'], rule['type'])
           end
         else
           -- returncodes: 1: infected, 2: suspicious, 3: both, 4-255: some error occured
@@ -831,7 +858,7 @@ local function clamav_check(task, content, digest, rule)
           upstream = rule.upstreams:get_upstream_round_robin()
           addr = upstream:get_addr()
 
-          lua_util.debugm(N, task, '%s [%s]: retry IP: %s', rule['symbol'], rule['type'], addr)
+          lua_util.debugm(N, task, '%s: retry IP: %s', rule.log_prefix, addr)
 
           tcp.request({
             task = task,
@@ -843,19 +870,19 @@ local function clamav_check(task, content, digest, rule)
             stop_pattern = '\0'
           })
         else
-          rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+          rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
           task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
         end
 
       else
         upstream:ok()
         data = tostring(data)
-        lua_util.debugm(N, task, '%s [%s]: got reply: %s', rule['symbol'], rule['type'], data)
+        lua_util.debugm(N, task, '%s: got reply: %s', rule.log_prefix, data)
         if data == 'stream: OK' then
           if rule['log_clean'] then
-            rspamd_logger.infox(task, '%s [%s]: message or mime_part is clean', rule['symbol'], rule['type'])
+            rspamd_logger.infox(task, '%s: message or mime_part is clean', rule['symbol'], rule['type'])
           else
-            lua_util.debugm(N, task, '%s [%s]: message or mime_part is clean', rule['symbol'], rule['type'])
+            lua_util.debugm(N, task, '%s: message or mime_part is clean', rule['symbol'], rule['type'])
           end
           save_av_cache(task, digest, rule, 'OK', 0)
         else
@@ -916,7 +943,7 @@ local function sophos_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s', rule['symbol'], rule['type'], addr)
+            lua_util.debugm(N, task, '%s: retry IP: %s', rule.log_prefix, addr)
 
             tcp.request({
               task = task,
@@ -927,13 +954,13 @@ local function sophos_check(task, content, digest, rule)
               data = { protocol, streamsize, content, bye }
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
         upstream:ok()
         data = tostring(data)
-        lua_util.debugm(N, task, '%s [%s]: got reply: %s', rule['symbol'], rule['type'], data)
+        lua_util.debugm(N, task, '%s: got reply: %s', rule.log_prefix, data)
         local vname = string.match(data, 'VIRUS (%S+) ')
         if vname then
           yield_result(task, rule, vname, rule.default_score)
@@ -941,9 +968,9 @@ local function sophos_check(task, content, digest, rule)
         else
           if string.find(data, 'DONE OK') then
             if rule['log_clean'] then
-              rspamd_logger.infox(task, '%s [%s]: message or mime_part is clean', rule['symbol'], rule['type'])
+              rspamd_logger.infox(task, '%s: message or mime_part is clean', rule['symbol'], rule['type'])
             else
-              lua_util.debugm(N, task, '%s [%s]: message or mime_part is clean', rule['symbol'], rule['type'])
+              lua_util.debugm(N, task, '%s: message or mime_part is clean', rule['symbol'], rule['type'])
             end
             save_av_cache(task, digest, rule, 'OK', 0)
             -- not finished - continue
@@ -1125,7 +1152,7 @@ local function savapi_check(task, content, digest, rule)
           upstream = rule.upstreams:get_upstream_round_robin()
           addr = upstream:get_addr()
 
-          lua_util.debugm(N, task, '%s [%s]: retry IP: %s', rule['symbol'], rule['type'], addr)
+          lua_util.debugm(N, task, '%s: retry IP: %s', rule.log_prefix, addr)
 
           tcp.request({
             task = task,
@@ -1136,7 +1163,7 @@ local function savapi_check(task, content, digest, rule)
             stop_pattern = {'\n'},
           })
         else
-          rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+          rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
           task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
         end
       else
@@ -1213,7 +1240,7 @@ local function kaspersky_check(task, content, digest, rule)
           addr = upstream:get_addr()
 
           lua_util.debugm(N, task,
-              '%s [%s]: retry IP: %s', rule['symbol'], rule['type'], addr)
+              '%s: retry IP: %s', rule.log_prefix, addr)
 
           tcp.request({
             task = task,
@@ -1226,7 +1253,7 @@ local function kaspersky_check(task, content, digest, rule)
           })
         else
           rspamd_logger.errx(task,
-              '%s [%s]: failed to scan, maximum retransmits exceed',
+              '%s: failed to scan, maximum retransmits exceed',
               rule['symbol'], rule['type'])
           task:insert_result(rule['symbol_fail'], 0.0,
               'failed to scan and retransmits exceed')
@@ -1236,15 +1263,15 @@ local function kaspersky_check(task, content, digest, rule)
         upstream:ok()
         data = tostring(data)
         local cached
-        lua_util.debugm(N, task, '%s [%s]: got reply: %s',
-            rule['symbol'], rule['type'], data)
+        lua_util.debugm(N, task, '%s: got reply: %s',
+            rule.log_prefix, data)
         if data == 'stream: OK' then
           cached = 'OK'
           if rule['log_clean'] then
-            rspamd_logger.infox(task, '%s [%s]: message or mime_part is clean',
+            rspamd_logger.infox(task, '%s: message or mime_part is clean',
                 rule['symbol'], rule['type'])
           else
-            lua_util.debugm(N, task, '%s [%s]: message or mime_part is clean',
+            lua_util.debugm(N, task, '%s: message or mime_part is clean',
                 rule['symbol'], rule['type'])
           end
         else
@@ -1349,7 +1376,7 @@ local function dcc_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s', rule['symbol'], rule['type'], addr)
+            lua_util.debugm(N, task, '%s: retry IP: %s', rule.log_prefix, addr)
 
             tcp.request({
               task = task,
@@ -1361,7 +1388,7 @@ local function dcc_check(task, content, digest, rule)
               callback = dcc_callback
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
@@ -1388,25 +1415,25 @@ local function dcc_check(task, content, digest, rule)
           elseif result == 'A' then
             -- do nothing
             if rule.log_clean then
-              rspamd_logger.infox(task, '%s [%s]: clean, returned result A - info: %s', rule['symbol'], rule['type'], info)
+              rspamd_logger.infox(task, '%s: clean, returned result A - info: %s', rule.log_prefix, info)
             else
-              lua_util.debugm(N, task, '%s [%s]: returned result A - info: %s', rule['symbol'], rule['type'], info)
+              lua_util.debugm(N, task, '%s: returned result A - info: %s', rule.log_prefix, info)
             end
             save_av_cache(task, digest, rule, 'OK')
           elseif result == 'G' then
             -- do nothing
             if rule.log_clean then
-              rspamd_logger.infox(task, '%s [%s]: clean, returned result G - info: %s', rule['symbol'], rule['type'], info)
+              rspamd_logger.infox(task, '%s: clean, returned result G - info: %s', rule.log_prefix, info)
             else
-              lua_util.debugm(N, task, '%s [%s]: returned result G - info: %s', rule['symbol'], rule['type'], info)
+              lua_util.debugm(N, task, '%s: returned result G - info: %s', rule.log_prefix, info)
             end
             save_av_cache(task, digest, rule, 'OK')
           elseif result == 'S' then
             -- do nothing
             if rule.log_clean then
-              rspamd_logger.infox(task, '%s [%s]: clean, returned result S - info: %s', rule['symbol'], rule['type'], info)
+              rspamd_logger.infox(task, '%s: clean, returned result S - info: %s', rule.log_prefix, info)
             else
-              lua_util.debugm(N, task, '%s [%s]: returned result S - info: %s', rule['symbol'], rule['type'], info)
+              lua_util.debugm(N, task, '%s: returned result S - info: %s', rule.log_prefix, info)
             end
             save_av_cache(task, digest, rule, 'OK')
           else
@@ -1459,7 +1486,7 @@ local function pyzor_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+            lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s', rule.log_prefix, addr, addr:get_port(), err)
 
             tcp.request({
               task = task,
@@ -1471,14 +1498,14 @@ local function pyzor_check(task, content, digest, rule)
               callback = pyzor_callback,
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
         -- Parse the response
         if upstream then upstream:ok() end
 
-        lua_util.debugm(N, task, '%s [%s]: returned data: %s', rule['symbol'], rule['type'], tostring(data))
+        lua_util.debugm(N, task, '%s: returned data: %s', rule.log_prefix, tostring(data))
         local ucl_parser = ucl.parser()
         local ok, py_err = ucl_parser:parse_string(tostring(data))
         if not ok then
@@ -1529,14 +1556,14 @@ local function pyzor_check(task, content, digest, rule)
         local threat_string = string.format("bl_%d_wl_%d", reported, whitelisted)
 
         if weight > 0 then
-          lua_util.debugm(N, task, '%s [%s]: returned result is spam - info: %s', rule['symbol'], rule['type'], info)
+          lua_util.debugm(N, task, '%s: returned result is spam - info: %s', rule.log_prefix, info)
           yield_result(task, rule, threat_string, weight)
           save_av_cache(task, digest, rule, threat_string, weight)
         else
           if rule.log_clean then
-            rspamd_logger.infox(task, '%s [%s]: clean, returned result is ham - info: %s', rule['symbol'], rule['type'], info)
+            rspamd_logger.infox(task, '%s: clean, returned result is ham - info: %s', rule.log_prefix, info)
           else
-            lua_util.debugm(N, task, '%s [%s]: returned result is ham - info: %s', rule['symbol'], rule['type'], info)
+            lua_util.debugm(N, task, '%s: returned result is ham - info: %s', rule.log_prefix, info)
           end
           save_av_cache(task, digest, rule, 'OK', weight)
         end
@@ -1545,8 +1572,8 @@ local function pyzor_check(task, content, digest, rule)
     end
 
     if text_parts_min_words(task, rule.text_part_min_words) then
-      rspamd_logger.infox(task, '%s [%s]: #words is less then text_part_min_words: %s',
-        rule['symbol'], rule['type'], rule.text_part_min_words)
+      rspamd_logger.infox(task, '%s: #words is less then text_part_min_words: %s',
+        rule.log_prefix, rule.text_part_min_words)
       return
     end
 
@@ -1591,7 +1618,7 @@ local function oletools_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+            lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s', rule.log_prefix, addr, addr:get_port(), err)
 
             tcp.request({
               task = task,
@@ -1604,7 +1631,7 @@ local function oletools_check(task, content, digest, rule)
               callback = oletools_callback,
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
@@ -1616,8 +1643,8 @@ local function oletools_check(task, content, digest, rule)
 
         local lines = rspamd_str_split(data, "\r\n")
 
-        lua_util.debugm(N, task, '%s [%s]: line6: %s', rule['symbol'], rule['type'], lines[6])
-        lua_util.debugm(N, task, '%s [%s]: line7: %s', rule['symbol'], rule['type'], lines[7])
+        lua_util.debugm(N, task, '%s: line6: %s', rule.log_prefix, lines[6])
+        lua_util.debugm(N, task, '%s: line7: %s', rule.log_prefix, lines[7])
 
         local flag_line = lines[6] or ''
         local matches_line = lines[7] or ''
@@ -1629,16 +1656,16 @@ local function oletools_check(task, content, digest, rule)
           -- SUSPICIOUS|AWX  |OLE:|49574.1544728465.877461
           local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|OLE:%|.*)"
           local flags_string = string.gsub(flag_line, pattern_symbols, "%2")
-          lua_util.debugm(N, task, '%s [%s]: flags_returned: |%s|', rule['symbol'], rule['type'], flags_string)
+          lua_util.debugm(N, task, '%s: flags_returned: |%s|', rule.log_prefix, flags_string)
           flags = string.match(flags_string, rule.oletools_flags)
-          lua_util.debugm(N, task, '%s [%s]: flags: |%s|', rule['symbol'], rule['type'], flags)
+          lua_util.debugm(N, task, '%s: flags: |%s|', rule.log_prefix, flags)
 
           if string.find(matches_line, 'Matches') then
             --           |     |    |Matches: ['Document_open', 'copyfile', 'CreateObject']
             local pattern_matches = "(.*Matches: %[)(.*)(%].*)"
             matches = string.gsub(matches_line, pattern_matches, "%2")
             matches = string.gsub(matches, "[%s%']", "")
-            lua_util.debugm(N, task, '%s [%s]: matches: |%s|', rule['symbol'], rule['type'], matches)
+            lua_util.debugm(N, task, '%s: matches: |%s|', rule.log_prefix, matches)
           end
         elseif string.find(flag_line, 'ERROR') then
 
@@ -1666,18 +1693,18 @@ local function oletools_check(task, content, digest, rule)
           local pattern_symbols = "( *%| *%| *%|)(.*)$"
           local error_string = string.gsub(error_line, pattern_symbols, "%2")
           local error_string2 = string.gsub(error_line2, pattern_symbols, "%2")
-          lua_util.debugm(N, task, '%s [%s]: ERROR: %s %s', rule['symbol'], rule['type'], error_string, error_string2)
-          rspamd_logger.warnx(task, '%s [%s]: oletools returned ERROR', rule['symbol'], rule['type'])
+          lua_util.debugm(N, task, '%s: ERROR: %s %s', rule.log_prefix, error_string, error_string2)
+          rspamd_logger.warnx(task, '%s: oletools returned ERROR', rule['symbol'], rule['type'])
         elseif rule.log_clean and string.find(flag_line, 'No Macro') then
-          rspamd_logger.infox(task, '%s [%s]: clean, document has no macro', rule['symbol'], rule['type'])
+          rspamd_logger.infox(task, '%s: clean, document has no macro', rule['symbol'], rule['type'])
         elseif rule.log_clean and string.find(flag_line, 'Macro OK') then
-          rspamd_logger.infox(task, '%s [%s]: clean, document has macro, but nothing suspicious', rule['symbol'], rule['type'])
+          rspamd_logger.infox(task, '%s: clean, document has macro, but nothing suspicious', rule['symbol'], rule['type'])
         else
-          rspamd_logger.warnx(task, '%s [%s]: unhandled response', rule['symbol'], rule['type'])
+          rspamd_logger.warnx(task, '%s: unhandled response', rule['symbol'], rule['type'])
         end
 
         if flags ~= nil then
-          lua_util.debugm(N, task, '%s [%s]: threat_string: |%s|', rule['symbol'], rule['type'], flags .. ' - ' .. matches)
+          lua_util.debugm(N, task, '%s: threat_string: |%s|', rule.log_prefix, flags .. ' - ' .. matches)
           local threat_table = {flags}
           local matches_table = rspamd_str_split(matches, ",")
           for _,m in ipairs(matches_table) do
@@ -1732,7 +1759,7 @@ local function razor_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+            lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s', rule.log_prefix, addr, addr:get_port(), err)
 
             tcp.request({
               task = task,
@@ -1744,7 +1771,7 @@ local function razor_check(task, content, digest, rule)
               callback = razor_callback,
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
@@ -1759,14 +1786,14 @@ local function razor_check(task, content, digest, rule)
         local threat_string = tostring(data)
         if threat_string == "spam" then
           task:insert_result(rule['symbol'], 1.0)
-          lua_util.debugm(N, task, '%s [%s]: returned result is spam', rule['symbol'], rule['type'])
+          lua_util.debugm(N, task, '%s: returned result is spam', rule['symbol'], rule['type'])
           yield_result(task, rule, threat_string, rule.default_score)
           save_av_cache(task, digest, rule, threat_string, rule.default_score)
         elseif threat_string == "ham" then
           if rule.log_clean then
-            rspamd_logger.infox(task, '%s [%s]: returned result is ham', rule['symbol'], rule['type'])
+            rspamd_logger.infox(task, '%s: returned result is ham', rule['symbol'], rule['type'])
           else
-            lua_util.debugm(N, task, '%s [%s]: returned result is ham', rule['symbol'], rule['type'])
+            lua_util.debugm(N, task, '%s: returned result is ham', rule['symbol'], rule['type'])
           end
           save_av_cache(task, digest, rule, 'OK', rule.default_score)
         else
@@ -1810,8 +1837,8 @@ local function spamassassin_check(task, content, digest, rule)
       "\r\n",
       content,
     }
-    --lua_util.debugm(N, task, '%s [%s]: get_content: %s', rule['symbol'], rule['type'], task:get_content())
-    --lua_util.debugm(N, task, '%s [%s]: request_data: %s', rule['symbol'], rule['type'], request_data)
+    --lua_util.debugm(N, task, '%s: get_content: %s', rule.log_prefix, task:get_content())
+    --lua_util.debugm(N, task, '%s: request_data: %s', rule.log_prefix, request_data)
 
     local function spamassassin_callback(err, data, conn)
 
@@ -1829,7 +1856,7 @@ local function spamassassin_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+            lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s', rule.log_prefix, addr, addr:get_port(), err)
 
             tcp.request({
               task = task,
@@ -1840,14 +1867,14 @@ local function spamassassin_check(task, content, digest, rule)
               callback = spamassassin_callback,
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
         -- Parse the response
         if upstream then upstream:ok() end
 
-        --lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], data)
+        --lua_util.debugm(N, task, '%s: returned result: %s', rule.log_prefix, data)
 
         --[[
         Spam: False ; 1.1 / 5.0
@@ -1857,7 +1884,7 @@ local function spamassassin_check(task, content, digest, rule)
           autolearn_force=no version=3.4.2
         ]] --
         local header = string.gsub(tostring(data), "[\r\n]+[\t ]", " ")
-        --lua_util.debugm(N, task, '%s [%s]: returned header: %s', rule['symbol'], rule['type'], header)
+        --lua_util.debugm(N, task, '%s: returned header: %s', rule.log_prefix, header)
 
         local symbols
         local spam_score
@@ -1865,7 +1892,7 @@ local function spamassassin_check(task, content, digest, rule)
             if string.find(s, 'Spam: .* / 5.0') then
               local pattern_symbols = "(Spam:.*; )(%-?%d?%d%.%d)( / 5%.0)"
               spam_score = string.gsub(s, pattern_symbols, "%2")
-              lua_util.debugm(N, task, '%s [%s]: spamd Spam line: %s', rule['symbol'], rule['type'], spam_score)
+              lua_util.debugm(N, task, '%s: spamd Spam line: %s', rule.log_prefix, spam_score)
             end
             if string.find(s, 'X%-Spam%-Status') then
               local pattern_symbols = "(.*X%-Spam%-Status.*tests%=)(.*)(autolearn%=.*version%=%d%.%d%.%d.*)"
@@ -1877,15 +1904,15 @@ local function spamassassin_check(task, content, digest, rule)
         if tonumber(spam_score) > 0 and #symbols > 0 and symbols ~= "none" then
           local symbols_table = {}
           symbols_table = rspamd_str_split(symbols, ",")
-          lua_util.debugm(N, task, '%s [%s]: returned symbols as table: %s', rule['symbol'], rule['type'], symbols_table)
+          lua_util.debugm(N, task, '%s: returned symbols as table: %s', rule.log_prefix, symbols_table)
 
           yield_result(task, rule, symbols_table, spam_score)
           save_av_cache(task, digest, rule, symbols_table, spam_score)
         else
           if rule.log_clean then
-            rspamd_logger.infox(task, '%s [%s]: clean, no spam detected', rule['symbol'], rule['type'])
+            rspamd_logger.infox(task, '%s: clean, no spam detected', rule['symbol'], rule['type'])
           else
-            lua_util.debugm(N, task, '%s [%s]: no spam detected - spam score: %s, symbols: %s', rule['symbol'], rule['type'], spam_score, symbols)
+            lua_util.debugm(N, task, '%s: no spam detected - spam score: %s, symbols: %s', rule.log_prefix, spam_score, symbols)
           end
         end
       end
@@ -1916,7 +1943,7 @@ local function icap_check(task, content, digest, rule)
     local retransmits = rule.retransmits
 
     -- Build the icap query
-    --lua_util.debugm(N, task, '%s [%s]: size: %s - %s', rule['symbol'], rule['type'], tonumber(task:get_size()), string.format('%02X', string.byte(task:get_size())))
+    --lua_util.debugm(N, task, '%s: size: %s - %s', rule.log_prefix, tonumber(task:get_size()), string.format('%02X', string.byte(task:get_size())))
     local size = string.format("%x", tonumber(#content))
     local respond_request = {
       "RESPMOD icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rule.scheme .. " ICAP/1.0\r\n",
@@ -1926,7 +1953,7 @@ local function icap_check(task, content, digest, rule)
       content,
       "\r\n0\r\n\r\n",
     }
-    lua_util.debugm(N, task, '%s [%s]: addr: |%s|%s|', rule['symbol'], rule['type'], addr:to_string(), addr:get_port())
+    lua_util.debugm(N, task, '%s: addr: |%s|%s|', rule.log_prefix, addr:to_string(), addr:get_port())
     local options_request = {
       "OPTIONS icap://" .. addr:to_string() .. ":" .. addr:get_port() .. "/" .. rule.scheme .. " ICAP/1.0\r\n",
       "Host:" .. addr:to_string() .. "\r\n",
@@ -1938,7 +1965,7 @@ local function icap_check(task, content, digest, rule)
 
       -- Parse the response
       local threat_string = {}
-      lua_util.debugm(N, task, '%s [%s]: returned result: %s', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
+      lua_util.debugm(N, task, '%s: returned result: %s', rule.log_prefix, string.gsub(result, "\r\n", ", "))
 
       --[[
         X-Virus-ID: Troj/DocDl-OYC
@@ -1949,13 +1976,13 @@ local function icap_check(task, content, digest, rule)
           if string.find(s, 'X%-Virus%-ID') then
             local pattern_symbols = "(X%-Virus%-ID: )(.*)"
             local match = string.gsub(s, pattern_symbols, "%2")
-            lua_util.debugm(N, task, '%s [%s]: icap X-Virus-ID: %s', rule['symbol'], rule['type'], match)
+            lua_util.debugm(N, task, '%s: icap X-Virus-ID: %s', rule.log_prefix, match)
             table.insert(threat_string, match)
           end
           if string.find(s, 'X%-Infection%-Found') then
             local pattern_symbols = "(X%-Infection%-Found: Type%=0; .* Threat%=)(.*)(;)"
             local match = string.gsub(s, pattern_symbols, "%2")
-            lua_util.debugm(N, task, '%s [%s]: icap X-Infection-Found: %s', rule['symbol'], rule['type'], match)
+            lua_util.debugm(N, task, '%s: icap X-Infection-Found: %s', rule.log_prefix, match)
             table.insert(threat_string, match)
           end
       end
@@ -1968,29 +1995,29 @@ local function icap_check(task, content, digest, rule)
 
     local function icap_r_respond_cb(err, data, conn)
       local result = tostring(data)
-      --lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
-      --lua_util.debugm(N, task, '%s [%s]: icap_r_respond_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
+      --lua_util.debugm(N, task, '%s: icap_r_respond_cb: |%s|%s|%s|', rule.log_prefix, data, err, conn)
+      --lua_util.debugm(N, task, '%s: icap_r_respond_cb result: |%s|', rule.log_prefix, string.gsub(result, "\r\n", ", "))
       conn:close()
       if string.find(result, 'ICAP%/1%.0') then
         icap_parse_result(result)
       else
-        lua_util.debugm(N, task, '%s [%s]: OPTIONS: No OK in return: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ", "))
+        lua_util.debugm(N, task, '%s: OPTIONS: No OK in return: |%s|', rule.log_prefix, string.gsub(result, "\r\n", ", "))
       end
     end
 
     local function icap_w_respond_cb(err, conn)
       conn:add_read(icap_r_respond_cb, '\r\n\r\n')
-      --lua_util.debugm(N, task, '%s [%s]: icap_w_respond_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
+      --lua_util.debugm(N, task, '%s: icap_w_respond_cb: |%s|%s|', rule.log_prefix, err, conn)
     end
 
     local function icap_r_options_cb(err, data, conn)
       local result = tostring(data)
-      --lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb: |%s|%s|%s|', rule['symbol'], rule['type'], data, err, conn)
-      --lua_util.debugm(N, task, '%s [%s]: icap_r_options_cb result: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ""))
+      --lua_util.debugm(N, task, '%s: icap_r_options_cb: |%s|%s|%s|', rule.log_prefix, data, err, conn)
+      --lua_util.debugm(N, task, '%s: icap_r_options_cb result: |%s|', rule.log_prefix, string.gsub(result, "\r\n", ""))
       if string.find(result, 'ICAP%/1%.0 200 OK') then
         conn:add_write(icap_w_respond_cb, respond_request)
       else
-        lua_util.debugm(N, task, '%s [%s]: OPTIONS: No OK in return: |%s|', rule['symbol'], rule['type'], string.gsub(result, "\r\n", ""))
+        lua_util.debugm(N, task, '%s: OPTIONS: No OK in return: |%s|', rule.log_prefix, string.gsub(result, "\r\n", ""))
       end
     end
 
@@ -2010,7 +2037,7 @@ local function icap_check(task, content, digest, rule)
             upstream = rule.upstreams:get_upstream_round_robin()
             addr = upstream:get_addr()
 
-            lua_util.debugm(N, task, '%s [%s]: retry IP: %s:%s err: %s', rule['symbol'], rule['type'], addr, addr:get_port(), err)
+            lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s', rule.log_prefix, addr, addr:get_port(), err)
 
             tcp.request({
               task = task,
@@ -2023,13 +2050,13 @@ local function icap_check(task, content, digest, rule)
               callback = icap_callback,
             })
           else
-            rspamd_logger.errx(task, '%s [%s]: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
+            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
             task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
           end
       else
-        --lua_util.debugm(N, task, '%s [%s]: connect result: |%s|', rule['symbol'], rule['type'], conn)
+        --lua_util.debugm(N, task, '%s: connect result: |%s|', rule.log_prefix, conn)
         conn:add_read(icap_r_options_cb, '\r\n\r\n')
-        --lua_util.debugm(N, task, '%s [%s]: icap_w_options_cb: |%s|%s|', rule['symbol'], rule['type'], err, conn)
+        --lua_util.debugm(N, task, '%s: icap_w_options_cb: |%s|%s|', rule.log_prefix, err, conn)
 
         -- set upstream ok
         if upstream then upstream:ok() end
@@ -2047,7 +2074,7 @@ local function icap_check(task, content, digest, rule)
       callback = icap_callback,
     })
 
-    --lua_util.debugm(N, task, '%s [%s]: after request: |%s|', rule['symbol'], rule['type'])
+    --lua_util.debugm(N, task, '%s: after request: |%s|', rule['symbol'], rule['type'])
   end
   if need_av_check(task, content, rule) then
     if check_av_cache(task, digest, rule, icap_check_uncached) then
@@ -2122,7 +2149,7 @@ local function add_external_services_rule(sym, opts)
   -- WORKAROUND for deprecated attachments_only
   if opts['attachments_only'] ~= nil then
     opts['scan_mime_parts'] = opts['attachments_only']
-    rspamd_logger.warnx(rspamd_config, '%s [%s]: Using attachments_only is deprecated. '..
+    rspamd_logger.warnx(rspamd_config, '%s: Using attachments_only is deprecated. '..
      'Please use scan_mime_parts = %s instead', opts['symbol'], opts['type'], opts['attachments_only'])
   end
   -- WORKAROUND for deprecated attachments_only
@@ -2182,11 +2209,11 @@ local function add_external_services_rule(sym, opts)
 
   local function match_filter(task, found, patterns)
     if type(patterns) ~= 'table' then
-      lua_util.debugm(N, task, '%s [%s]: pattern not table %s', rule['symbol'], rule['type'], type(patterns))
+      lua_util.debugm(N, task, '%s: pattern not table %s', rule.log_prefix, type(patterns))
       return false
     end
     if not patterns[1] then
-      --lua_util.debugm(N, task, '%s [%s]: in not pattern[1]', rule['symbol'], rule['type'])
+      --lua_util.debugm(N, task, '%s: in not pattern[1]', rule['symbol'], rule['type'])
       for _, pat in pairs(patterns) do
         if pat:match(found) then
           return true
@@ -2215,7 +2242,7 @@ local function add_external_services_rule(sym, opts)
     for n = 1, 2 do
         ext[n] = #filename_parts > n and string.lower(filename_parts[#filename_parts + 1 - n]) or nil
     end
-  --lua_util.debugm(N, task, '%s [%s]: extension found: %s', rule['symbol'], rule['type'], ext[1])
+  --lua_util.debugm(N, task, '%s: extension found: %s', rule.log_prefix, ext[1])
     return ext[1],ext[2],filename_parts
   end
 
@@ -2229,26 +2256,26 @@ local function add_external_services_rule(sym, opts)
         local ext,ext2,part_table
         local extension_check = false
         local content_type_check = false
-        --lua_util.debugm(N, task, '%s [%s]: mime_parts_filter_ext: %s', rule['symbol'], rule['type'], rule['mime_parts_filter_ext'])
-        --lua_util.debugm(N, task, '%s [%s]: mime_parts_filter_regex: %s', rule['symbol'], rule['type'], rule['mime_parts_filter_regex'])
-        --lua_util.debugm(N, task, '%s [%s]: fname: %s', rule['symbol'], rule['type'], fname)
+        --lua_util.debugm(N, task, '%s: mime_parts_filter_ext: %s', rule.log_prefix, rule['mime_parts_filter_ext'])
+        --lua_util.debugm(N, task, '%s: mime_parts_filter_regex: %s', rule.log_prefix, rule['mime_parts_filter_regex'])
+        --lua_util.debugm(N, task, '%s: fname: %s', rule.log_prefix, fname)
         if fname ~= nil then
-          --lua_util.debugm(N, task, '%s [%s]: fname not nil - %s', rule['symbol'], rule['type'], fname)
-          --lua_util.debugm(N, task, '%s [%s]: fname not nil match - %s', rule['symbol'], rule['type'], match_filter(task, fname, rule['mime_parts_filter_regex']))
+          --lua_util.debugm(N, task, '%s: fname not nil - %s', rule.log_prefix, fname)
+          --lua_util.debugm(N, task, '%s: fname not nil match - %s', rule.log_prefix, match_filter(task, fname, rule['mime_parts_filter_regex']))
           ext,ext2,part_table = gen_extension(fname)
-          lua_util.debugm(N, task, '%s [%s]: extension found: %s - 2.ext: %s - parts: %s', rule['symbol'], rule['type'], ext, ext2, part_table)
+          lua_util.debugm(N, task, '%s: extension found: %s - 2.ext: %s - parts: %s', rule.log_prefix, ext, ext2, part_table)
           if match_filter(task, ext, rule['mime_parts_filter_ext']) or match_filter(task, ext2, rule['mime_parts_filter_ext']) then
-            lua_util.debugm(N, task, '%s [%s]: extension matched: %s', rule['symbol'], rule['type'], ext)
+            lua_util.debugm(N, task, '%s: extension matched: %s', rule.log_prefix, ext)
             extension_check = true
           end
           if match_filter(task, fname, rule['mime_parts_filter_regex']) then
-            --lua_util.debugm(N, task, '%s [%s]: regex fname: %s', rule['symbol'], rule['type'], fname)
+            --lua_util.debugm(N, task, '%s: regex fname: %s', rule.log_prefix, fname)
             content_type_check = true
           end
         end
         if content_type ~=nil and content_subtype ~= nil then
           if match_filter(task, content_type..'/'..content_subtype, rule['mime_parts_filter_regex']) then
-            lua_util.debugm(N, task, '%s [%s]: regex ct: %s', rule['symbol'], rule['type'], content_type..'/'..content_subtype)
+            lua_util.debugm(N, task, '%s: regex ct: %s', rule.log_prefix, content_type..'/'..content_subtype)
             content_type_check = true
           end
         end
@@ -2263,7 +2290,7 @@ local function add_external_services_rule(sym, opts)
       fun.each(function(p)
         local content = p:get_content()
         --local length = p:get_raw_length()
-        --lua_util.debugm(N, task, '%s [%s]: mime_part length : %s', rule['symbol'], rule['type'], length)
+        --lua_util.debugm(N, task, '%s: mime_part length : %s', rule.log_prefix, length)
         if content and #content > 0 then
           cfg.check(task, content, p:get_digest(), rule)
         end
@@ -2283,6 +2310,7 @@ if opts and type(opts) == 'table' then
   for k, m in pairs(opts) do
     if type(m) == 'table' and m.servers then
       if not m.type then m.type = k end
+      if not m.name then m.name = k end
       local cb = add_external_services_rule(k, m)
 
       if not cb then
