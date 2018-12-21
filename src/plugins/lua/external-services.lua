@@ -1654,7 +1654,7 @@ local function oletools_check(task, content, digest, rule)
         local matches
         if string.find(flag_line, 'SUSPICIOUS') then
           -- SUSPICIOUS|AWX  |OLE:|49574.1544728465.877461
-          local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|OLE:%|.*)"
+          local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|...:%|.*)"
           local flags_string = string.gsub(flag_line, pattern_symbols, "%2")
           lua_util.debugm(N, task, '%s: flags_returned: |%s|', rule.log_prefix, flags_string)
           flags = string.match(flags_string, rule.oletools_flags)
@@ -1980,7 +1980,7 @@ local function icap_check(task, content, digest, rule)
             table.insert(threat_string, match)
           end
           if string.find(s, 'X%-Infection%-Found') then
-            local pattern_symbols = "(X%-Infection%-Found: Type%=0; .* Threat%=)(.*)(;)"
+            local pattern_symbols = "(X%-Infection%-Found: Type%=%d; .* Threat%=)(.*)([;]+)"
             local match = string.gsub(s, pattern_symbols, "%2")
             lua_util.debugm(N, task, '%s: icap X-Infection-Found: %s', rule.log_prefix, match)
             table.insert(threat_string, match)
