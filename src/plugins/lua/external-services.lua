@@ -475,7 +475,7 @@ local function oletools_config(opts)
     timeout = 15.0,
     log_clean = false,
     retransmits = 2,
-    cache_expire = 7200, -- expire redis in one hour
+    cache_expire = 7200, -- expire redis in 2h
     message = '${SCANNER}: Oletools threat message found: "${VIRUS}"',
     detection_category = "office macro",
     oletools_flags = "A.X";
@@ -1645,15 +1645,24 @@ local function oletools_check(task, content, digest, rule)
 
         lua_util.debugm(N, task, '%s: line6: %s', rule.log_prefix, lines[6])
         lua_util.debugm(N, task, '%s: line7: %s', rule.log_prefix, lines[7])
+        lua_util.debugm(N, task, '%s: line8: %s', rule.log_prefix, lines[8])
 
         local flag_line = lines[6] or ''
-        local matches_line = lines[7] or ''
+        local matches_line = lines[7]..lines[8] or ''
         local error_line = lines[8] or ''
         local error_line2 = lines[9] or ''
         local flags
         local matches
         if string.find(flag_line, 'SUSPICIOUS') then
           -- SUSPICIOUS|AWX  |OLE:|49574.1544728465.877461
+          -- MacroRaptor 0.53 - http://decalage.info/python/oletools
+          -- This is work in progress, please report issues at https://github.com/decalage2/oletools/issues
+          -- ----------+-----+----+--------------------------------------------------------
+          -- Result    |Flags|Type|File
+          -- ----------+-----+----+--------------------------------------------------------
+          -- SUSPICIOUS|A-X  |OpX:|1545402678.0867093.44346
+          --           |     |    |Matches: ['cmdCancel_Click', 'Declare Function
+          --           |     |    |OpenClipboard Lib']
           local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|...:%|.*)"
           local flags_string = string.gsub(flag_line, pattern_symbols, "%2")
           lua_util.debugm(N, task, '%s: flags_returned: |%s|', rule.log_prefix, flags_string)
@@ -1662,6 +1671,8 @@ local function oletools_check(task, content, digest, rule)
 
           if string.find(matches_line, 'Matches') then
             --           |     |    |Matches: ['Document_open', 'copyfile', 'CreateObject']
+            matches_line = string.gsub(matches_line, "%s|", " ")
+            lua_util.debugm(N, task, '%s: matches_line: |%s|', rule.log_prefix, matches_line)
             local pattern_matches = "(.*Matches: %[)(.*)(%].*)"
             matches = string.gsub(matches_line, pattern_matches, "%2")
             matches = string.gsub(matches, "[%s%']", "")
@@ -1704,7 +1715,7 @@ local function oletools_check(task, content, digest, rule)
         end
 
         if flags ~= nil then
-          lua_util.debugm(N, task, '%s: threat_string: |%s|', rule.log_prefix, flags .. ' - ' .. matches)
+          lua_util.debugm(N, task, '%s: threat_string: |%s|', rule.log_prefix, flags .. ',' .. matches)
           local threat_table = {flags}
           local matches_table = rspamd_str_split(matches, ",")
           for _,m in ipairs(matches_table) do
@@ -1971,6 +1982,8 @@ local function icap_check(task, content, digest, rule)
         X-Virus-ID: Troj/DocDl-OYC
         X-Infection-Found: Type=0; Resolution=2; Threat=Troj/DocDl-OYC;
         X-Infection-Found: Type=0; Resolution=2; Threat=W97M.Downloader;
+        X-Infection-Found: Type=2; Resolution=2; Threat=Container size violation
+        X-Infection-Found: Type=2; Resolution=2; Threat=Encrypted container violation;
       ]] --
       for s in result:gmatch("[^\r\n]+") do
           if string.find(s, 'X%-Virus%-ID') then
