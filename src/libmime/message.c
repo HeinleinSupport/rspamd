@@ -712,7 +712,8 @@ rspamd_message_process_text_part_maybe (struct rspamd_task *task,
 	gboolean found_html = FALSE, found_txt = FALSE;
 	enum rspamd_action_type act;
 
-	if (IS_CT_TEXT (mime_part->ct)) {
+	if (IS_CT_TEXT (mime_part->ct) && (!mime_part->detected_ct ||
+									   IS_CT_TEXT (mime_part->detected_ct))) {
 		html_tok.begin = "html";
 		html_tok.len = 4;
 		xhtml_tok.begin = "xhtml";
@@ -899,6 +900,7 @@ rspamd_message_from_data (struct rspamd_task *task, const guchar *start,
 	const char *mb = NULL;
 	gchar *mid;
 	rspamd_ftok_t srch, *tok;
+	gchar cdbuf[1024];
 
 	g_assert (start != NULL);
 
@@ -923,10 +925,25 @@ rspamd_message_from_data (struct rspamd_task *task, const guchar *start,
 			srch.len = strlen (mb);
 			ct = rspamd_content_type_parse (srch.begin, srch.len,
 					task->task_pool);
-			msg_warn_task ("construct fake mime of type: %s", mb);
 
 			if (!part->ct) {
+				msg_info_task ("construct fake mime of type: %s", mb);
 				part->ct = ct;
+			}
+			else {
+				/* Check sanity */
+				if (IS_CT_TEXT (part->ct)) {
+					RSPAMD_FTOK_FROM_STR (&srch, "application");
+
+					if (rspamd_ftok_cmp (&ct->type, &srch) == 0) {
+						msg_info_task ("construct fake mime of type: %s", mb);
+						part->ct = ct;
+					}
+				}
+				else {
+					msg_info_task ("construct fake mime of type: %T/%T, detected %s",
+							&part->ct->type, &part->ct->subtype, mb);
+				}
 			}
 
 			part->detected_ct = ct;
@@ -937,6 +954,27 @@ rspamd_message_from_data (struct rspamd_task *task, const guchar *start,
 	part->raw_data.len = len;
 	part->parsed_data.begin = start;
 	part->parsed_data.len = len;
+	part->id = task->parts->len;
+	part->raw_headers =  g_hash_table_new_full (rspamd_strcase_hash,
+			rspamd_strcase_equal, NULL, rspamd_ptr_array_free_hard);
+	part->headers_order = g_queue_new ();
+
+
+
+	tok = rspamd_task_get_request_header (task, "Filename");
+
+	if (tok) {
+		rspamd_snprintf (cdbuf, sizeof (cdbuf), "inline; filename=\"%T\"", tok);
+	}
+	else {
+		rspamd_snprintf (cdbuf, sizeof (cdbuf), "inline");
+	}
+
+	part->cd = rspamd_content_disposition_parse (cdbuf, strlen (cdbuf),
+			task->task_pool);
+
+	g_ptr_array_add (task->parts, part);
+	rspamd_mime_parser_calc_digest (part);
 
 	/* Generate message ID */
 	mid = rspamd_mime_message_id_generate ("localhost.localdomain");
@@ -1041,7 +1079,6 @@ rspamd_message_parse (struct rspamd_task *task)
 		}
 	}
 	else {
-		task->flags &= ~RSPAMD_TASK_FLAG_MIME;
 		rspamd_message_from_data (task, p, len);
 	}
 
@@ -1222,6 +1259,23 @@ rspamd_message_process (struct rspamd_task *task)
 	rspamd_images_process (task);
 	rspamd_archives_process (task);
 
+	/* Calculate average words length and number of short words */
+	struct rspamd_mime_text_part *text_part;
+	gdouble *var;
+	guint total_words = 0;
+
+	PTR_ARRAY_FOREACH (task->text_parts, i, text_part) {
+		if (!text_part->language) {
+			rspamd_mime_part_detect_language (task, text_part);
+		}
+
+		rspamd_mime_part_extract_words (task, text_part);
+
+		if (text_part->utf_words) {
+			total_words += text_part->nwords;
+		}
+	}
+
 	/* Calculate distance for 2-parts messages */
 	if (task->text_parts->len == 2) {
 		p1 = g_ptr_array_index (task->text_parts, 0);
@@ -1258,8 +1312,6 @@ rspamd_message_process (struct rspamd_task *task)
 							sel = p2;
 						}
 					}
-
-					rspamd_mime_part_detect_language (task, sel);
 
 					if (sel->language && sel->language[0]) {
 						/* Propagate language */
@@ -1308,23 +1360,6 @@ rspamd_message_process (struct rspamd_task *task)
 		else {
 			debug_task (
 					"message contains two parts but they are in different multi-parts");
-		}
-	}
-
-	/* Calculate average words length and number of short words */
-	struct rspamd_mime_text_part *text_part;
-	gdouble *var;
-	guint total_words = 0;
-
-	PTR_ARRAY_FOREACH (task->text_parts, i, text_part) {
-		if (!text_part->language) {
-			rspamd_mime_part_detect_language (task, text_part);
-		}
-
-		rspamd_mime_part_extract_words (task, text_part);
-
-		if (text_part->utf_words) {
-			total_words += text_part->nwords;
 		}
 	}
 

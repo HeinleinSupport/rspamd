@@ -7,6 +7,7 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+#include <stdbool.h>
 
 #include "rspamd.h"
 #include "ucl.h"
@@ -463,6 +464,7 @@ gint rspamd_lua_push_words (lua_State *L, GArray *words,
 #define RSPAMD_DBDIR_INDEX "DBDIR"
 #define RSPAMD_LOGDIR_INDEX "LOGDIR"
 #define RSPAMD_PLUGINSDIR_INDEX "PLUGINSDIR"
+#define RSPAMD_SHAREDIR_INDEX "SHAREDIR"
 #define RSPAMD_RULESDIR_INDEX "RULESDIR"
 #define RSPAMD_LUALIBDIR_INDEX "LUALIBDIR"
 #define RSPAMD_WWWDIR_INDEX "WWWDIR"

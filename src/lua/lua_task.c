@@ -618,6 +618,20 @@ LUA_FUNCTION_DEF (task, get_symbols_tokens);
  */
 LUA_FUNCTION_DEF (task, has_symbol);
 /***
+ * @method task:has_symbol(name)
+ * Fast path to check if a specified symbol is in the task's results
+ * @param {string} name symbol's name
+ * @return {boolean} `true` if symbol has been found
+ */
+LUA_FUNCTION_DEF (task, enable_symbol);
+/***
+ * @method task:has_symbol(name)
+ * Fast path to check if a specified symbol is in the task's results
+ * @param {string} name symbol's name
+ * @return {boolean} `true` if symbol has been found
+ */
+LUA_FUNCTION_DEF (task, disable_symbol);
+/***
  * @method task:get_date(type[, gmt])
  * Returns timestamp for a connection or for a MIME message. This function can be called with a
  * single table arguments with the following fields:
@@ -1042,6 +1056,8 @@ static const struct luaL_reg tasklib_m[] = {
 	LUA_INTERFACE_DEF (task, get_symbols_numeric),
 	LUA_INTERFACE_DEF (task, get_symbols_tokens),
 	LUA_INTERFACE_DEF (task, has_symbol),
+	LUA_INTERFACE_DEF (task, enable_symbol),
+	LUA_INTERFACE_DEF (task, disable_symbol),
 	LUA_INTERFACE_DEF (task, get_date),
 	LUA_INTERFACE_DEF (task, get_message_id),
 	LUA_INTERFACE_DEF (task, get_timeval),
@@ -2090,6 +2106,12 @@ rspamd_lua_push_header (lua_State *L, struct rspamd_mime_header *rh,
 
 		if (rh->value) {
 			rspamd_lua_table_set (L, "value", rh->value);
+		}
+
+		if (rh->raw_len > 0) {
+			lua_pushstring (L, "raw");
+			lua_pushlstring (L, rh->raw_value, rh->raw_len);
+			lua_settable (L, -3);
 		}
 
 		if (rh->decoded) {
@@ -3655,6 +3677,48 @@ lua_task_has_symbol (lua_State *L)
 }
 
 static gint
+lua_task_enable_symbol (lua_State *L)
+{
+	LUA_TRACE_POINT;
+	struct rspamd_task *task = lua_check_task (L, 1);
+	const gchar *symbol;
+	gboolean found = FALSE;
+
+	symbol = luaL_checkstring (L, 2);
+
+	if (task && symbol) {
+		found = rspamd_symcache_enable_symbol (task, task->cfg->cache, symbol);
+		lua_pushboolean (L, found);
+	}
+	else {
+		return luaL_error (L, "invalid arguments");
+	}
+
+	return 1;
+}
+
+static gint
+lua_task_disable_symbol (lua_State *L)
+{
+	LUA_TRACE_POINT;
+	struct rspamd_task *task = lua_check_task (L, 1);
+	const gchar *symbol;
+	gboolean found = FALSE;
+
+	symbol = luaL_checkstring (L, 2);
+
+	if (task && symbol) {
+		found = rspamd_symcache_disable_symbol (task, task->cfg->cache, symbol);
+		lua_pushboolean (L, found);
+	}
+	else {
+		return luaL_error (L, "invalid arguments");
+	}
+
+	return 1;
+}
+
+static gint
 lua_task_get_symbols (lua_State *L)
 {
 	LUA_TRACE_POINT;
@@ -4114,6 +4178,8 @@ lua_task_has_flag (lua_State *L)
 				RSPAMD_TASK_FLAG_MILTER);
 		LUA_TASK_GET_FLAG (flag, "bad_unicode",
 				RSPAMD_TASK_FLAG_BAD_UNICODE);
+		LUA_TASK_GET_FLAG (flag, "mime",
+				RSPAMD_TASK_FLAG_MIME);
 
 		if (!found) {
 			msg_warn_task ("unknown flag requested: %s", flag);

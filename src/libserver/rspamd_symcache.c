@@ -56,11 +56,15 @@ INIT_LOG_MODULE(symcache)
 	((dyn_item)->started)
 #define SET_START_BIT(checkpoint, dyn_item) \
 	(dyn_item)->started = 1
+#define CLR_START_BIT(checkpoint, dyn_item) \
+	(dyn_item)->started = 0
 
 #define CHECK_FINISH_BIT(checkpoint, dyn_item) \
 	((dyn_item)->finished)
 #define SET_FINISH_BIT(checkpoint, dyn_item) \
 	(dyn_item)->finished = 1
+#define CLR_FINISH_BIT(checkpoint, dyn_item) \
+	(dyn_item)->finished = 0
 
 static const guchar rspamd_symcache_magic[8] = {'r', 's', 'c', 2, 0, 0, 0, 0 };
 
@@ -1378,7 +1382,8 @@ rspamd_symcache_check_symbol (struct rspamd_task *task,
 	SET_START_BIT (checkpoint, dyn_item);
 
 	if (!item->enabled ||
-		(RSPAMD_TASK_IS_EMPTY (task) && !(item->type & SYMBOL_TYPE_EMPTY))) {
+		(RSPAMD_TASK_IS_EMPTY (task) && !(item->type & SYMBOL_TYPE_EMPTY)) ||
+		(item->type & SYMBOL_TYPE_MIME_ONLY && !RSPAMD_TASK_IS_MIME(task))) {
 		check = FALSE;
 	}
 	else if (item->specific.normal.condition_cb != -1) {
@@ -2413,8 +2418,8 @@ rspamd_symcache_is_checked (struct rspamd_task *task,
 }
 
 void
-rspamd_symcache_disable_symbol (struct rspamd_symcache *cache,
-								const gchar *symbol)
+rspamd_symcache_disable_symbol_perm (struct rspamd_symcache *cache,
+									 const gchar *symbol)
 {
 	struct rspamd_symcache_item *item;
 
@@ -2429,8 +2434,8 @@ rspamd_symcache_disable_symbol (struct rspamd_symcache *cache,
 }
 
 void
-rspamd_symcache_enable_symbol (struct rspamd_symcache *cache,
-							   const gchar *symbol)
+rspamd_symcache_enable_symbol_perm (struct rspamd_symcache *cache,
+									const gchar *symbol)
 {
 	struct rspamd_symcache_item *item;
 
@@ -2498,6 +2503,81 @@ rspamd_symcache_is_symbol_enabled (struct rspamd_task *task,
 						ret = lua_toboolean (L, -1);
 						lua_pop (L, 1);
 					}
+				}
+			}
+		}
+	}
+
+	return ret;
+}
+
+
+gboolean
+rspamd_symcache_enable_symbol (struct rspamd_task *task,
+							   struct rspamd_symcache *cache,
+							   const gchar *symbol)
+{
+	struct cache_savepoint *checkpoint;
+	struct rspamd_symcache_item *item;
+	struct rspamd_symcache_dynamic_item *dyn_item;
+	gboolean ret = FALSE;
+
+	g_assert (cache != NULL);
+	g_assert (symbol != NULL);
+
+	checkpoint = task->checkpoint;
+
+	if (checkpoint) {
+		item = rspamd_symcache_find_filter (cache, symbol);
+
+		if (item) {
+			dyn_item = rspamd_symcache_get_dynamic (checkpoint, item);
+
+			if (!CHECK_FINISH_BIT (checkpoint, dyn_item)) {
+				ret = TRUE;
+				CLR_START_BIT (checkpoint, dyn_item);
+				CLR_FINISH_BIT (checkpoint, dyn_item);
+			}
+			else {
+				msg_debug_task ("cannot enable symbol %s: already started", symbol);
+			}
+		}
+	}
+
+	return ret;
+}
+
+
+gboolean
+rspamd_symcache_disable_symbol (struct rspamd_task *task,
+								struct rspamd_symcache *cache,
+								const gchar *symbol)
+{
+	struct cache_savepoint *checkpoint;
+	struct rspamd_symcache_item *item;
+	struct rspamd_symcache_dynamic_item *dyn_item;
+	gboolean ret = FALSE;
+
+	g_assert (cache != NULL);
+	g_assert (symbol != NULL);
+
+	checkpoint = task->checkpoint;
+
+	if (checkpoint) {
+		item = rspamd_symcache_find_filter (cache, symbol);
+
+		if (item) {
+			dyn_item = rspamd_symcache_get_dynamic (checkpoint, item);
+
+			if (!CHECK_START_BIT (checkpoint, dyn_item)) {
+				ret = TRUE;
+				SET_START_BIT (checkpoint, dyn_item);
+				SET_FINISH_BIT (checkpoint, dyn_item);
+			}
+			else {
+				if (!CHECK_FINISH_BIT (checkpoint, dyn_item)) {
+					msg_warn_task ("cannot disable symbol %s: already started",
+							symbol);
 				}
 			}
 		}
