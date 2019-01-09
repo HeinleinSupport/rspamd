@@ -1643,10 +1643,10 @@ local function oletools_check(task, content, digest, rule)
         lua_util.debugm(N, task, 'data: %s', tostring(data))
 
         local ucl_parser = ucl.parser()
-        local ok, err = ucl_parser:parse_string(tostring(data))
+        local ok, ucl_err = ucl_parser:parse_string(tostring(data))
         if not ok then
             rspamd_logger.errx(task, "%s: error parsing json response: %s",
-              rule.log_prefix, err)
+              rule.log_prefix, ucl_err)
             return
         end
 
