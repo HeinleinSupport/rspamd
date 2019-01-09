@@ -481,6 +481,7 @@ local function oletools_config(opts)
     oletools_flags = "A.X";
     default_score = 1,
     action = false,
+    extended = false
   }
 
   oletools_conf = lua_util.override_defaults(oletools_conf, opts)
@@ -1641,88 +1642,102 @@ local function oletools_check(task, content, digest, rule)
         data = tostring(data)
         lua_util.debugm(N, task, 'data: %s', tostring(data))
 
-        local lines = rspamd_str_split(data, "\r\n")
-
-        lua_util.debugm(N, task, '%s: line6: %s', rule.log_prefix, lines[6])
-        lua_util.debugm(N, task, '%s: line7: %s', rule.log_prefix, lines[7])
-        lua_util.debugm(N, task, '%s: line8: %s', rule.log_prefix, lines[8])
-
-        local flag_line = lines[6] or ''
-        local matches_line = lines[7]..lines[8] or ''
-        local error_line = lines[8] or ''
-        local error_line2 = lines[9] or ''
-        local flags
-        local matches
-        if string.find(flag_line, 'SUSPICIOUS') then
-          -- SUSPICIOUS|AWX  |OLE:|49574.1544728465.877461
-          -- MacroRaptor 0.53 - http://decalage.info/python/oletools
-          -- This is work in progress, please report issues at https://github.com/decalage2/oletools/issues
-          -- ----------+-----+----+--------------------------------------------------------
-          -- Result    |Flags|Type|File
-          -- ----------+-----+----+--------------------------------------------------------
-          -- SUSPICIOUS|A-X  |OpX:|1545402678.0867093.44346
-          --           |     |    |Matches: ['cmdCancel_Click', 'Declare Function
-          --           |     |    |OpenClipboard Lib']
-          local pattern_symbols = "(SUSPICIOUS%|)(.*)(  %|...:%|.*)"
-          local flags_string = string.gsub(flag_line, pattern_symbols, "%2")
-          lua_util.debugm(N, task, '%s: flags_returned: |%s|', rule.log_prefix, flags_string)
-          flags = string.match(flags_string, rule.oletools_flags)
-          lua_util.debugm(N, task, '%s: flags: |%s|', rule.log_prefix, flags)
-
-          if string.find(matches_line, 'Matches') then
-            --           |     |    |Matches: ['Document_open', 'copyfile', 'CreateObject']
-            matches_line = string.gsub(matches_line, "%s|", " ")
-            lua_util.debugm(N, task, '%s: matches_line: |%s|', rule.log_prefix, matches_line)
-            local pattern_matches = "(.*Matches: %[)(.*)(%].*)"
-            matches = string.gsub(matches_line, pattern_matches, "%2")
-            matches = string.gsub(matches, "[%s%']", "")
-            lua_util.debugm(N, task, '%s: matches: |%s|', rule.log_prefix, matches)
-          end
-        elseif string.find(flag_line, 'ERROR') then
-
-          -- MacroRaptor 0.53 - http://decalage.info/python/oletools
-          -- This is work in progress, please report issues at https://github.com/decalage2/oletools/issues
-          -- ----------+-----+----+--------------------------------------------------------
-          -- Result    |Flags|Type|File
-          -- ----------+-----+----+--------------------------------------------------------
-          -- ERROR     |     |??? |/tmp/oletools//1545021249.743918.30108
-          --           |     |    |Failed to open file
-          --           |     |    |/tmp/oletools//1545021249.743918.30108 is RTF, need to
-          --           |     |    |run rtfobj.py and find VBA Macros in its output.
-          -- Flags: A=AutoExec, W=Write, X=Execute
-
-          -- MacroRaptor 0.53 - http://decalage.info/python/oletools
-          -- This is work in progress, please report issues at https://github.com/decalage2/oletools/issues
-          -- ----------+-----+----+--------------------------------------------------------
-          -- Result    |Flags|Type|File
-          -- ----------+-----+----+--------------------------------------------------------
-          -- ERROR     |     |??? |/tmp/oletools//1545028202.5934522.28846
-          --           |     |    |Failed to open file
-          --           |     |    |/tmp/oletools//1545028202.5934522.28846 is not a
-          --           |     |    |supported file type, cannot extract VBA Macros.
-
-          local pattern_symbols = "( *%| *%| *%|)(.*)$"
-          local error_string = string.gsub(error_line, pattern_symbols, "%2")
-          local error_string2 = string.gsub(error_line2, pattern_symbols, "%2")
-          lua_util.debugm(N, task, '%s: ERROR: %s %s', rule.log_prefix, error_string, error_string2)
-          rspamd_logger.warnx(task, '%s: oletools returned ERROR', rule['symbol'], rule['type'])
-        elseif rule.log_clean and string.find(flag_line, 'No Macro') then
-          rspamd_logger.infox(task, '%s: clean, document has no macro', rule['symbol'], rule['type'])
-        elseif rule.log_clean and string.find(flag_line, 'Macro OK') then
-          rspamd_logger.infox(task, '%s: clean, document has macro, but nothing suspicious', rule['symbol'], rule['type'])
-        else
-          rspamd_logger.warnx(task, '%s: unhandled response', rule['symbol'], rule['type'])
+        local ucl_parser = ucl.parser()
+        local ok, err = ucl_parser:parse_string(tostring(data))
+        if not ok then
+            rspamd_logger.errx(task, "%s: error parsing json response: %s",
+              rule.log_prefix, err)
+            return
         end
 
-        if flags ~= nil then
-          lua_util.debugm(N, task, '%s: threat_string: |%s|', rule.log_prefix, flags .. ',' .. matches)
-          local threat_table = {flags}
-          local matches_table = rspamd_str_split(matches, ",")
-          for _,m in ipairs(matches_table) do
-            table.insert(threat_table, m)
+        local result = ucl_parser:get_object()
+
+        local oletools_rc = {
+          [0] = 'RETURN_OK',
+          [1] = 'RETURN_WARNINGS',
+          [2] = 'RETURN_WRONG_ARGS',
+          [3] = 'RETURN_FILE_NOT_FOUND',
+          [4] = 'RETURN_XGLOB_ERR',
+          [5] = 'RETURN_OPEN_ERROR',
+          [6] = 'RETURN_PARSE_ERROR',
+          [7] = 'RETURN_SEVERAL_ERRS',
+          [8] = 'RETURN_UNEXPECTED',
+          [9] = 'RETURN_ENCRYPTED',
+        }
+
+
+        lua_util.debugm(N, task, '%s: result: %s', rule.log_prefix, result)
+        if result[1].error ~= nil then
+          rspamd_logger.errx(task, '%s: ERROR found: %s', rule.log_prefix,
+            result[1].error)
+        elseif result[3]['return_code'] == 9 then
+          rspamd_logger.warnx(task, '%s: File is encrypted.', rule.log_prefix)
+        elseif result[3]['return_code'] > 0 then
+          rspamd_logger.errx(task, '%s: Error Retuned: %s', rule.log_prefix,
+            oletools_rc[result[3]['return_code']])
+        elseif result[2]['analysis'] == 'null' and #result[2]['macros'] == 0 then
+          if rule.log_clean == true then
+            rspamd_logger.infox(task, '%s: Scanned Macro is OK', rule.log_prefix)
+          else
+            lua_util.debugm(N, task, '%s: No Macro found', rule.log_prefix)
           end
-          yield_result(task, rule, threat_table, rule.default_score)
-          save_av_cache(task, digest, rule, threat_table, rule.default_score)
+        elseif #result[2]['macros'] > 0 then
+
+          for _,m in ipairs(result[2]['macros']) do
+            lua_util.debugm(N, task, '%s: macros found - code: %s, ole_stream: %s, '..
+              'vba_filename: %s', rule.log_prefix, m.code, m.ole_stream, m.vba_filename)
+          end
+
+          local macro_autoexec = false
+          local macro_suspicious = false
+          local macro_keyword_table = {}
+
+          for _,a in ipairs(result[2]['analysis']) do
+            lua_util.debugm(N, task, '%s: threat found - type: %s, keyword: %s, '..
+              'description: %s', rule.log_prefix, a.type, a.keyword, a.description)
+            if a.type == 'AutoExec' then
+              macro_autoexec = true
+              if rule.extended == true then
+                table.insert(macro_keyword_table, a.keyword)
+              end
+            elseif a.type == 'Suspicious'
+              and a.keyword ~= 'Base64 Strings'
+              and a.keyword ~= 'Hex Strings'
+            then
+              macro_suspicious = true
+              if rule.extended == true then
+                table.insert(macro_keyword_table, a.keyword)
+              end
+            end
+          end
+
+          if macro_autoexec then
+            table.insert(macro_keyword_table, 'AutoExec')
+          end
+          if macro_suspicious then
+            table.insert(macro_keyword_table, 'Suspicious')
+          end
+
+          lua_util.debugm(N, task, '%s: extended: %s', rule.log_prefix, rule.extended)
+          if rule.extended == false and macro_autoexec and macro_suspicious then
+
+            lua_util.debugm(N, task, '%s: found macro_autoexec and '..
+              'macro_suspicious', rule.log_prefix)
+            local threat = 'Macro: AutoExec and Suspicious'
+            yield_result(task, rule, threat, rule.default_score)
+            save_av_cache(task, digest, rule, threat, rule.default_score)
+
+          elseif rule.extended == true and #macro_keyword_table > 0 then
+
+            yield_result(task, rule, macro_keyword_table, rule.default_score)
+            save_av_cache(task, digest, rule, macro_keyword_table, rule.default_score)
+
+          elseif rule.log_clean == true then
+            rspamd_logger.infox(task, '%s: Scanned Macro is OK', rule.log_prefix)
+          end
+
+        else
+          rspamd_logger.warnx(task, '%s: unhandled response', rule.log_prefix)
         end
       end
     end
