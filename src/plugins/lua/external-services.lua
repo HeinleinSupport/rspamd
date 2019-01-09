@@ -1667,6 +1667,7 @@ local function oletools_check(task, content, digest, rule)
 
 
         lua_util.debugm(N, task, '%s: result: %s', rule.log_prefix, result)
+        lua_util.debugm(N, task, '%s: olefy filename: %s', rule.log_prefix, result[2]['file'])
         if result[1].error ~= nil then
           rspamd_logger.errx(task, '%s: ERROR found: %s', rule.log_prefix,
             result[1].error)
