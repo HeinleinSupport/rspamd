@@ -1605,7 +1605,7 @@ local function oletools_check(task, content, digest, rule)
 
     local function oletools_callback(err, data, conn)
 
-      if err then
+      local function oletools_requery()
         -- set current upstream to fail because an error occurred
         upstream:fail()
 
@@ -1614,12 +1614,15 @@ local function oletools_check(task, content, digest, rule)
 
           retransmits = retransmits - 1
 
+          lua_util.debugm(N, task, '%s: Request Error: %s - retries left: %s',
+            rule.log_prefix, err, retransmits)
+
           -- Select a different upstream!
           upstream = rule.upstreams:get_upstream_round_robin()
           addr = upstream:get_addr()
 
-          lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s',
-            rule.log_prefix, addr, addr:get_port(), err)
+          lua_util.debugm(N, task, '%s: retry IP: %s:%s',
+            rule.log_prefix, addr, addr:get_port())
 
           tcp.request({
             task = task,
@@ -1627,16 +1630,21 @@ local function oletools_check(task, content, digest, rule)
             port = addr:get_port(),
             timeout = rule['timeout'],
             shutdown = true,
-            --data = { "CHECK\n" , content },
             data = content,
             callback = oletools_callback,
           })
         else
           rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits '..
-            'exceed', rule['symbol'], rule['type'])
+            'exceed', rule.log_prefix)
           task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and '..
             'retransmits exceed')
         end
+      end
+
+      if err then
+
+        oletools_requery()
+
       else
         -- Parse the response
         if upstream then upstream:ok() end
@@ -1667,17 +1675,23 @@ local function oletools_check(task, content, digest, rule)
           [9] = 'RETURN_ENCRYPTED',
         }
 
-
-        lua_util.debugm(N, task, '%s: result: %s', rule.log_prefix, result)
+        --lua_util.debugm(N, task, '%s: result: %s', rule.log_prefix, result)
         lua_util.debugm(N, task, '%s: olefy filename: %s', rule.log_prefix, result[2]['file'])
+        lua_util.debugm(N, task, '%s: olefy type: %s', rule.log_prefix, result[2]['type'])
+
         if result[1].error ~= nil then
-          rspamd_logger.errx(task, '%s: ERROR found: %s', rule.log_prefix,
+          rspamd_logger.errx(task, '%s: Olefy ERROR found: %s', rule.log_prefix,
             result[1].error)
+          oletools_requery()
         elseif result[3]['return_code'] == 9 then
           rspamd_logger.warnx(task, '%s: File is encrypted.', rule.log_prefix)
-        elseif result[3]['return_code'] > 0 then
-          rspamd_logger.errx(task, '%s: Error Retuned: %s', rule.log_prefix,
-            oletools_rc[result[3]['return_code']])
+        elseif result[3]['return_code'] > 6 then
+          rspamd_logger.errx(task, '%s: Oletools Error Returned: %s',
+            rule.log_prefix, oletools_rc[result[3]['return_code']])
+        elseif result[3]['return_code'] > 1 then
+          rspamd_logger.errx(task, '%s: Oletools Error Returned: %s',
+            rule.log_prefix, oletools_rc[result[3]['return_code']])
+          oletools_requery()
         elseif result[2]['analysis'] == 'null' and #result[2]['macros'] == 0 then
           if rule.log_clean == true then
             rspamd_logger.infox(task, '%s: Scanned Macro is OK', rule.log_prefix)
@@ -1696,8 +1710,10 @@ local function oletools_check(task, content, digest, rule)
           local macro_keyword_table = {}
 
           for _,a in ipairs(result[2]['analysis']) do
-            lua_util.debugm(N, task, '%s: threat found - type: %s, keyword: %s, '..
-              'description: %s', rule.log_prefix, a.type, a.keyword, a.description)
+            if a.type ~= 'AutoExec' or a.type ~= 'Suspicious' then
+              lua_util.debugm(N, task, '%s: threat found - type: %s, keyword: %s, '..
+                'description: %s', rule.log_prefix, a.type, a.keyword, a.description)
+            end
             if a.type == 'AutoExec' then
               macro_autoexec = true
               if rule.extended == true then
@@ -1726,7 +1742,7 @@ local function oletools_check(task, content, digest, rule)
 
             lua_util.debugm(N, task, '%s: found macro_autoexec and '..
               'macro_suspicious', rule.log_prefix)
-            local threat = 'Macro: AutoExec and Suspicious'
+            local threat = 'AutoExec+Suspicious'
             yield_result(task, rule, threat, rule.default_score)
             save_av_cache(task, digest, rule, threat, rule.default_score)
 
@@ -1751,10 +1767,10 @@ local function oletools_check(task, content, digest, rule)
       port = addr:get_port(),
       timeout = rule['timeout'],
       shutdown = true,
-      --data = { "CHECK\n" , content },
       data = content,
       callback = oletools_callback,
     })
+
   end
   if need_av_check(task, content, rule) then
     if check_av_cache(task, digest, rule, oletools_check_uncached) then
