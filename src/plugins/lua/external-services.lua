@@ -1606,35 +1606,37 @@ local function oletools_check(task, content, digest, rule)
     local function oletools_callback(err, data, conn)
 
       if err then
+        -- set current upstream to fail because an error occurred
+        upstream:fail()
 
-          -- set current upstream to fail because an error occurred
-          upstream:fail()
+        -- retry with another upstream until retransmits exceeds
+        if retransmits > 0 then
 
-          -- retry with another upstream until retransmits exceeds
-          if retransmits > 0 then
+          retransmits = retransmits - 1
 
-            retransmits = retransmits - 1
+          -- Select a different upstream!
+          upstream = rule.upstreams:get_upstream_round_robin()
+          addr = upstream:get_addr()
 
-            -- Select a different upstream!
-            upstream = rule.upstreams:get_upstream_round_robin()
-            addr = upstream:get_addr()
+          lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s',
+            rule.log_prefix, addr, addr:get_port(), err)
 
-            lua_util.debugm(N, task, '%s: retry IP: %s:%s err: %s', rule.log_prefix, addr, addr:get_port(), err)
-
-            tcp.request({
-              task = task,
-              host = addr:to_string(),
-              port = addr:get_port(),
-              timeout = rule['timeout'],
-              shutdown = true,
-              --data = { "CHECK\n" , content },
-              data = content,
-              callback = oletools_callback,
-            })
-          else
-            rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits exceed', rule['symbol'], rule['type'])
-            task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and retransmits exceed')
-          end
+          tcp.request({
+            task = task,
+            host = addr:to_string(),
+            port = addr:get_port(),
+            timeout = rule['timeout'],
+            shutdown = true,
+            --data = { "CHECK\n" , content },
+            data = content,
+            callback = oletools_callback,
+          })
+        else
+          rspamd_logger.errx(task, '%s: failed to scan, maximum retransmits '..
+            'exceed', rule['symbol'], rule['type'])
+          task:insert_result(rule['symbol_fail'], 0.0, 'failed to scan and '..
+            'retransmits exceed')
+        end
       else
         -- Parse the response
         if upstream then upstream:ok() end
