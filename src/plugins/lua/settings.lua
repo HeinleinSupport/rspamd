@@ -383,21 +383,20 @@ local function check_settings(task)
           if s.rule['symbols'] then
             lua_util.debugm(N, rspamd_config, 'symbols debug: %s', s.rule['symbols'])
 
-            if s.rule['symbols'] then
-              -- Register virtual symbols
-              for k,v in pairs(s.rule['symbols']) do
-                local rtb = {
-                  type = 'virtual',
-                  parent = module_sym_id,
-                }
-                if type(k) == 'number' and type(v) == 'string' then
-                  rtb.name = v
-                elseif type(k) == 'string' then
-                  rtb.name = k
-                end
-                rspamd_config:register_symbol(rtb)
+            -- Register virtual symbols
+            for k,v in pairs(s.rule['symbols']) do
+              local rtb = {
+                type = 'virtual',
+                parent = module_sym_id,
+              }
+              if type(k) == 'number' and type(v) == 'string' then
+                rtb.name = v
+              elseif type(k) == 'string' then
+                rtb.name = k
               end
+              rspamd_config:register_symbol(rtb)
             end
+            
             -- Add symbols, specified in the settings
             fun.each(function(val)
               task:insert_result(val, 1.0)
