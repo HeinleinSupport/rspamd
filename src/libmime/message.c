@@ -1518,11 +1518,10 @@ rspamd_message_dtor(struct rspamd_message *msg)
 			}
 		}
 
-		if (p->part_type == RSPAMD_MIME_PART_CUSTOM_LUA &&
-			p->specific.lua_specific.cbref != -1) {
+		if (p->lua_specific.cbref != -1) {
 			luaL_unref(msg->task->cfg->lua_state,
 					   LUA_REGISTRYINDEX,
-					   p->specific.lua_specific.cbref);
+					   p->lua_specific.cbref);
 		}
 
 		if (p->urls) {
@@ -1947,9 +1946,17 @@ void rspamd_message_process(struct rspamd_task *task)
 	{
 		/* detected_* are already set by mime_parser; no extra lua_magic call here */
 
-		/* Now detect content */
+		/* Now detect content.
+		 * Archives are included deliberately: rspamd_archives_process() above has
+		 * already set RSPAMD_MIME_PART_ARCHIVE on them, and the OOXML content
+		 * handler needs exactly that - it reads the entry list through
+		 * mime_part:get_archive(). Restricting this to UNDEFINED parts would
+		 * make every ZIP-based format (docx/xlsx/pptx and friends) unreachable
+		 * from lua_content.
+		 */
 		if (content_func_pos != -1 && part->parsed_data.len > 0 &&
-			part->part_type == RSPAMD_MIME_PART_UNDEFINED) {
+			(part->part_type == RSPAMD_MIME_PART_UNDEFINED ||
+			 part->part_type == RSPAMD_MIME_PART_ARCHIVE)) {
 			struct rspamd_mime_part **pmime;
 			struct rspamd_task **ptask;
 

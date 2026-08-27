@@ -2475,11 +2475,11 @@ lua_mimepart_get_specific(lua_State *L)
 		return luaL_error(L, "invalid arguments");
 	}
 
-	if (part->part_type != RSPAMD_MIME_PART_CUSTOM_LUA) {
+	if (part->lua_specific.cbref == -1) {
 		lua_pushnil(L);
 	}
 	else {
-		lua_rawgeti(L, LUA_REGISTRYINDEX, part->specific.lua_specific.cbref);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, part->lua_specific.cbref);
 	}
 
 	return 1;
@@ -2536,7 +2536,7 @@ lua_mimepart_is_specific(lua_State *L)
 		return luaL_error(L, "invalid arguments");
 	}
 
-	lua_pushboolean(L, part->part_type == RSPAMD_MIME_PART_CUSTOM_LUA);
+	lua_pushboolean(L, part->lua_specific.cbref != -1);
 
 	return 1;
 }
@@ -2566,50 +2566,47 @@ lua_mimepart_set_specific(lua_State *L)
 		return luaL_error(L, "invalid arguments");
 	}
 
-	if (part->part_type != RSPAMD_MIME_PART_UNDEFINED &&
-		part->part_type != RSPAMD_MIME_PART_CUSTOM_LUA) {
-		return luaL_error(L,
-						  "internal error: trying to set specific lua content on part of type %d",
-						  part->part_type);
-	}
-
-	if (part->part_type == RSPAMD_MIME_PART_CUSTOM_LUA) {
+	/*
+	 * No part_type restriction here: lua_specific lives outside the part_type
+	 * union, so storing extracted content never disturbs whatever the part
+	 * already is (an archive keeps its entry list, an image its metadata).
+	 */
+	if (part->lua_specific.cbref != -1) {
 		/* Push old specific data */
-		lua_rawgeti(L, LUA_REGISTRYINDEX, part->specific.lua_specific.cbref);
-		luaL_unref(L, LUA_REGISTRYINDEX, part->specific.lua_specific.cbref);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, part->lua_specific.cbref);
+		luaL_unref(L, LUA_REGISTRYINDEX, part->lua_specific.cbref);
 	}
 	else {
-		part->part_type = RSPAMD_MIME_PART_CUSTOM_LUA;
 		lua_pushnil(L);
 	}
 
 	/* Now, we push argument on the position 2 and save its reference */
 	lua_pushvalue(L, 2);
-	part->specific.lua_specific.cbref = luaL_ref(L, LUA_REGISTRYINDEX);
+	part->lua_specific.cbref = luaL_ref(L, LUA_REGISTRYINDEX);
 	/* Now stack has just a return value as luaL_ref removes value from stack */
 
 	int ltype = lua_type(L, 2);
 
 	switch (ltype) {
 	case LUA_TTABLE:
-		part->specific.lua_specific.type = RSPAMD_LUA_PART_TABLE;
+		part->lua_specific.type = RSPAMD_LUA_PART_TABLE;
 		break;
 	case LUA_TSTRING:
-		part->specific.lua_specific.type = RSPAMD_LUA_PART_STRING;
+		part->lua_specific.type = RSPAMD_LUA_PART_STRING;
 		break;
 	case LUA_TUSERDATA:
 		if (rspamd_lua_check_udata_maybe(L, 2, rspamd_text_classname)) {
-			part->specific.lua_specific.type = RSPAMD_LUA_PART_TEXT;
+			part->lua_specific.type = RSPAMD_LUA_PART_TEXT;
 		}
 		else {
-			part->specific.lua_specific.type = RSPAMD_LUA_PART_UNKNOWN;
+			part->lua_specific.type = RSPAMD_LUA_PART_UNKNOWN;
 		}
 		break;
 	case LUA_TFUNCTION:
-		part->specific.lua_specific.type = RSPAMD_LUA_PART_FUNCTION;
+		part->lua_specific.type = RSPAMD_LUA_PART_FUNCTION;
 		break;
 	default:
-		part->specific.lua_specific.type = RSPAMD_LUA_PART_UNKNOWN;
+		part->lua_specific.type = RSPAMD_LUA_PART_UNKNOWN;
 		break;
 	}
 

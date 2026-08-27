@@ -6001,10 +6001,10 @@ fuzzy_generate_commands(struct rspamd_task *task, struct fuzzy_rule *rule,
 												  mime_part);
 					io->flags |= FUZZY_CMD_FLAG_IMAGE;
 				}
-				else if (check_part && mime_part->part_type == RSPAMD_MIME_PART_CUSTOM_LUA) {
+				else if (check_part && mime_part->lua_specific.cbref != -1) {
 					const struct rspamd_lua_specific_part *lua_spec;
 
-					lua_spec = &mime_part->specific.lua_specific;
+					lua_spec = &mime_part->lua_specific;
 
 					if (lua_spec->type == RSPAMD_LUA_PART_TABLE) {
 						lua_State *L = (lua_State *) task->cfg->lua_state;

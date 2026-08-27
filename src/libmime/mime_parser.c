@@ -1173,6 +1173,8 @@ rspamd_mime_process_multipart_node(struct rspamd_task *task,
 	npart->parent_part = multipart;
 	npart->raw_headers = rspamd_message_headers_new();
 	npart->headers_order = NULL;
+	/* alloc0 leaves this at 0, which is a valid registry index; -1 means unset */
+	npart->lua_specific.cbref = -1;
 
 	if (multipart) {
 		if (multipart->specific.mp->children == NULL) {
@@ -1778,6 +1780,8 @@ rspamd_mime_parse_message(struct rspamd_task *task,
 	/* Allocate real part */
 	npart = rspamd_mempool_alloc0(task->task_pool,
 								  sizeof(struct rspamd_mime_part));
+	/* alloc0 leaves this at 0, which is a valid registry index; -1 means unset */
+	npart->lua_specific.cbref = -1;
 
 	if (part == NULL) {
 		/* Top level message */

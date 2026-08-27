@@ -47,7 +47,6 @@ enum rspamd_mime_part_type {
 	RSPAMD_MIME_PART_TEXT,
 	RSPAMD_MIME_PART_ARCHIVE,
 	RSPAMD_MIME_PART_IMAGE,
-	RSPAMD_MIME_PART_CUSTOM_LUA
 };
 
 #define IS_PART_MULTIPART(part) ((part) && ((part)->part_type == RSPAMD_MIME_PART_MULTIPART))
@@ -110,8 +109,22 @@ struct rspamd_mime_part {
 		struct rspamd_mime_text_part *txt;
 		struct rspamd_image *img;
 		struct rspamd_archive *arch;
-		struct rspamd_lua_specific_part lua_specific;
 	} specific;
+
+	/*
+	 * Content extracted by a lua_content handler.
+	 *
+	 * Deliberately NOT part of the union above. part_type says what kind of
+	 * MIME structure this is; lua_specific says what a Lua handler managed to
+	 * pull out of it, and the two are independent. An OOXML document is both a
+	 * recognised archive (specific.arch, needed to enumerate the entries) and a
+	 * part with Lua-extracted content, and while the two aliased each other the
+	 * archive pointer could not survive set_specific(), so no ZIP-based format
+	 * could carry lua_content results at all.
+	 *
+	 * cbref is -1 when no handler has stored anything.
+	 */
+	struct rspamd_lua_specific_part lua_specific;
 
 	unsigned char digest[rspamd_cryptobox_HASHBYTES];
 };
