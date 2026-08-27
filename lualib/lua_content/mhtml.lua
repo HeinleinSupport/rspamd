@@ -114,11 +114,79 @@ local MHTML_MAX_DECODED = 1024 * 1024
 local boundary_re = rspamd_regexp.create_cached(
     [=[(?i)boundary\s*=\s*(?:"([^"]+)"|([^\s;"]+))]=])
 
+-- True when byte offset `idx` starts a genuine MIME boundary delimiter line:
+-- preceded by the start of the buffer or a newline, followed by an optional
+-- closing "--", optional transport padding, then a newline/end of buffer.
+-- Without this, "--boundary" occurring incidentally inside a part's own
+-- (possibly encoded) content would be read as a delimiter and split the
+-- archive in the wrong place.
+--
+-- RFC 2046 5.1.1 defines transport padding as *LWSP-char, with no upper
+-- bound, so the padding run must not be capped: a producer - or an attacker -
+-- may put arbitrarily many spaces before the CRLF, and refusing such a line
+-- makes split_parts() return nothing at all. The inner parts then stay
+-- undecoded and a base64 or quoted-printable phishing body becomes invisible,
+-- which is precisely the evasion this validation exists to close.
+--
+-- Everything is therefore matched *in place*. string.find anchors '^' at its
+-- init position and returns offsets rather than substrings, so no part of the
+-- remaining archive is ever copied. That is what keeps this linear: the check
+-- runs once per literal occurrence of the delimiter, and materialising the
+-- tail with buf:sub() would make a body full of near-miss delimiter lines
+-- copy megabytes per candidate and stall the worker synchronously. The
+-- padding scans cannot compound either - each one stops at the first byte
+-- that is not SP/TAB, so the scans of successive candidates partition the
+-- buffer instead of overlapping.
+local function is_boundary_line(buf, idx, delim_len)
+  if idx > 1 and buf:sub(idx - 1, idx - 1) ~= '\n' then
+    return false
+  end
+
+  local from = idx + delim_len
+
+  -- Optional closing "--" of a terminating delimiter
+  if buf:find('^%-%-', from) then
+    from = from + 2
+  end
+
+  -- Consume the transport padding, however long it is
+  local _, pad_end = buf:find('^[ \t]*', from)
+  local nxt = pad_end + 1
+
+  if nxt > #buf then
+    -- The delimiter, with its padding, ends the archive
+    return true
+  end
+
+  local c = buf:sub(nxt, nxt)
+
+  return c == '\n' or (c == '\r' and buf:sub(nxt + 1, nxt + 1) == '\n')
+end
+
+-- The next genuine boundary delimiter line at or after `from`, or nil.
+local function find_boundary(buf, from, delim)
+  local pos = from
+
+  while true do
+    local idx = buf:find(delim, pos, true)
+
+    if not idx then
+      return nil
+    end
+
+    if is_boundary_line(buf, idx, #delim) then
+      return idx
+    end
+
+    pos = idx + 1
+  end
+end
+
 -- Split an archive body on its MIME boundary delimiter.
 local function split_parts(buf, boundary)
   local parts = {}
   local delim = '--' .. boundary
-  local first = buf:find(delim, 1, true)
+  local first = find_boundary(buf, 1, delim)
 
   if not first then
     return parts
@@ -132,7 +200,7 @@ local function split_parts(buf, boundary)
       break
     end
 
-    local nxt = buf:find(delim, pos, true)
+    local nxt = find_boundary(buf, pos, delim)
 
     if not nxt then
       break
@@ -162,6 +230,46 @@ local function split_headers(part)
   return part:sub(1, at - 1), part:sub(at + skip)
 end
 
+-- Removes RFC 5322 header folding (CRLF/LF immediately followed by SP/TAB)
+-- entirely, rather than collapsing it to one space. A lenient MUA discards
+-- the fold the same way when rendering, so a value - or even a header name -
+-- deliberately split at a byte boundary (e.g. "text/\r\n html",
+-- "Content-Transfer-\r\n Encoding") must reassemble into one token here too,
+-- or the substring checks below are trivially evaded.
+local function unfold(text)
+  return (text:gsub('\r?\n[ \t]+', ''))
+end
+
+-- The value of the first `name:` header, scoped to just that logical line of
+-- an already-unfolded header block (one physical line per header). Without
+-- this, a plain substring search over the whole block can be hijacked by an
+-- unrelated decoy header carrying the same text (e.g. an "X-Note:
+-- boundary=decoy" header read as if it were part of Content-Type).
+--
+-- Linear whitespace between the field name and the colon is accepted on
+-- purpose. The wrapper trie matches `Content-Type\s*:`, so refusing that
+-- spelling here would let "Content-Type : multipart/related" register as an
+-- MHTML archive and then yield no boundary at all - the inner parts would
+-- never be decoded and the phishing heuristics would see only the raw,
+-- still-encoded archive. The same spelling on an inner part's
+-- Content-Transfer-Encoding would leave a base64 body undecoded.
+local function header_line(header, name)
+  local lname = name:lower()
+  local nlen = #lname
+
+  for line in (header .. '\n'):gmatch('([^\n]*)\n') do
+    local lline = line:lower()
+
+    -- Compared as a plain prefix rather than a Lua pattern: header names
+    -- contain '-', which is a quantifier in a pattern
+    if lline:sub(1, nlen) == lname and lline:sub(nlen + 1):match('^[ \t]*:') then
+      return line
+    end
+  end
+
+  return nil
+end
+
 -- Decode one inner part's body according to its Content-Transfer-Encoding.
 -- Returns nil for parts that are not worth looking at as text.
 local function decode_part(part, budget)
@@ -171,13 +279,13 @@ local function decode_part(part, budget)
     return nil
   end
 
-  local lheaders = headers:lower()
+  headers = unfold(headers)
 
   -- Only text parts can carry the constructs the heuristics look for.
   -- A part with no Content-Type defaults to text/plain per RFC 2045.
-  local ctype_at = lheaders:find('content-type:', 1, true) -- plain search
+  local ctype = header_line(headers, 'content-type')
 
-  if ctype_at and not lheaders:find('content%-type:%s*text/') then
+  if ctype and not ctype:lower():find('content%-type%s*:%s*text/') then
     return nil
   end
 
@@ -185,7 +293,10 @@ local function decode_part(part, budget)
     body = body:sub(1, budget)
   end
 
-  if lheaders:find('content%-transfer%-encoding:%s*base64') then
+  local cte = header_line(headers, 'content-transfer-encoding')
+  local lcte = cte and cte:lower() or ''
+
+  if lcte:find('base64', 1, true) then
     -- A truncated base64 body must still decode, so trim to a 4-char group
     local trimmed = body:gsub('%s', '')
     local usable = #trimmed - (#trimmed % 4)
@@ -199,7 +310,7 @@ local function decode_part(part, budget)
     return decoded and tostring(decoded) or nil
   end
 
-  if lheaders:find('content%-transfer%-encoding:%s*quoted%-printable') then
+  if lcte:find('quoted-printable', 1, true) then
     local decoded = rspamd_util.decode_qp(body)
 
     return decoded and tostring(decoded) or nil
@@ -243,6 +354,11 @@ local function process_mhtml(input, mpart, task)
     return nil
   end
 
+  -- Unfolded once and reused below for both wrapper detection and the
+  -- boundary lookup, so a continuation-line fold cannot split a token out
+  -- from under either check (see unfold()'s comment).
+  header = unfold(lua_content_util.to_string(header, MHTML_HEADER_WINDOW))
+
   local wrapper = {}
   lua_content_util.scan_flags(wrapper_trie, wrapper_patterns, header, wrapper)
 
@@ -282,8 +398,12 @@ local function process_mhtml(input, mpart, task)
 
   -- Decode the inner parts and scan those too. Without this the heuristics
   -- only ever see an archive whose HTML happens to be stored unencoded.
+  -- Scoped to the outer Content-Type header's own line: searching the whole
+  -- header block let an unrelated header carrying "boundary=" hijack the
+  -- extracted value.
   local boundary
-  local bm = boundary_re:search(header, true, true)
+  local ctype = header_line(header, 'content-type')
+  local bm = ctype and boundary_re:search(ctype, true, true)
 
   if bm and bm[1] then
     boundary = bm[1][2] or bm[1][3]

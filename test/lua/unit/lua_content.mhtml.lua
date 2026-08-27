@@ -310,4 +310,266 @@ context("MHTML attachment heuristics", function()
     assert_true(res.has_password_input)
     task:destroy()
   end)
+
+  -- A literal substring match on "content-transfer-encoding:" broke as soon
+  -- as a continuation-line fold landed inside the header name, leaving the
+  -- part treated as already-plain-text and the base64 body scanned as-is.
+  test("decodes a base64 inner part whose Content-Transfer-Encoding header name is folded", function()
+    local rspamd_util = require "rspamd_util"
+    local task = get_task()
+    local encoded = tostring(rspamd_util.encode_base64(phish_html, 76))
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="BOUND1"',
+      "",
+      "--BOUND1",
+      "Content-Type: text/html; charset=utf-8",
+      "Content-Transfer-\r\n Encoding: base64",
+      "",
+      encoded,
+      "--BOUND1--",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res, 'folded CTE header name')
+    assert_true(res.has_password_input, 'folded CTE header name')
+    task:destroy()
+  end)
+
+  -- boundary_re used to search the whole outer header block for the first
+  -- "boundary=" occurrence instead of the Content-Type header's own value,
+  -- so an unrelated earlier header carrying that text could hijack it.
+  test("a decoy header containing boundary= does not hijack the real boundary", function()
+    local rspamd_util = require "rspamd_util"
+    local task = get_task()
+    local encoded = tostring(rspamd_util.encode_base64(phish_html, 76))
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "X-Note: see notes; boundary=decoyvalue",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="REALBOUND"',
+      "",
+      "--REALBOUND",
+      "Content-Type: text/html; charset=utf-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      encoded,
+      "--REALBOUND--",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res)
+    assert_equal(res.part_count, 1,
+        'expected the real boundary to be used, got: ' .. tostring(res.part_count))
+    assert_true(res.has_password_input, 'decoy boundary header')
+    task:destroy()
+  end)
+
+  -- split_parts used to match "--boundary" as a plain substring anywhere in
+  -- the buffer, so an incidental occurrence inside a part's own content (not
+  -- at the start of a line) split the archive in the wrong place and lost
+  -- the rest of that part's content to a bogus, header-less fragment.
+  test("an incidental boundary-like substring inside a part's content does not split it", function()
+    local task = get_task()
+    local body = '<html><body><p>ref: xx--REALBOUND-inline-not-a-delimiter</p>'
+        .. '<form action="http://phish.example.com/steal">'
+        .. '<input type="password" name="passwd"></form></body></html>'
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="REALBOUND"',
+      "",
+      "--REALBOUND",
+      "Content-Type: text/html",
+      "",
+      body,
+      "--REALBOUND--",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res)
+    assert_equal(res.part_count, 1,
+        'expected exactly one inner part, got: ' .. tostring(res.part_count))
+    assert_true(res.has_password_input, 'password field after the incidental substring')
+    task:destroy()
+  end)
+
+  -- RFC 2046 permits linear whitespace after either delimiter form before
+  -- its terminating CRLF. Rejecting it silently skipped all encoded parts.
+  test("boundary transport padding does not prevent decoding inner parts", function()
+    local rspamd_util = require "rspamd_util"
+    local task = get_task()
+    local encoded = tostring(rspamd_util.encode_base64(phish_html, 76))
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="PADDED"',
+      "",
+      "--PADDED \t",
+      "Content-Type: text/html; charset=utf-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      encoded,
+      "--PADDED-- \t",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res)
+    assert_equal(res.part_count, 1, 'padded delimiters must split the part')
+    assert_true(res.has_password_input, 'padded delimiters')
+    task:destroy()
+  end)
+
+  -- RFC 2046 5.1.1 puts no upper bound on transport padding, so any cap on how
+  -- much of it is inspected is a detection bypass: a delimiter rejected for
+  -- being "too padded" leaves split_parts() with nothing, and the encoded body
+  -- behind it never reaches the heuristics. Both lengths here sit far beyond
+  -- anything a real producer emits, which is exactly the point - they are what
+  -- an attacker would send.
+  local function padded_archive(npad)
+    local rspamd_util = require "rspamd_util"
+    local encoded = tostring(rspamd_util.encode_base64(phish_html, 76))
+    local pad = string.rep(" ", npad)
+
+    return table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="PADDED"',
+      "",
+      "--PADDED" .. pad,
+      "Content-Type: text/html; charset=utf-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      encoded,
+      "--PADDED--" .. pad,
+      "",
+    }, "\r\n")
+  end
+
+  test("transport padding just past a plausible cap still decodes", function()
+    local task = get_task()
+    local res = mhtml.process(padded_archive(65), nil, task)
+    assert_not_nil(res, '65 bytes of padding')
+    assert_equal(res.part_count, 1, '65 bytes of padding must still split the part')
+    assert_true(res.has_password_input, '65 bytes of padding')
+    task:destroy()
+  end)
+
+  test("arbitrarily long transport padding still decodes", function()
+    local task = get_task()
+    local res = mhtml.process(padded_archive(8192), nil, task)
+    assert_not_nil(res, '8192 bytes of padding')
+    assert_equal(res.part_count, 1, 'long padding must still split the part')
+    assert_true(res.has_password_input, '8192 bytes of padding')
+    task:destroy()
+  end)
+
+  -- The wrapper trie matches `Content-Type\s*:`, so the header lookup that
+  -- finds the boundary and the inner Content-Transfer-Encoding has to accept
+  -- the same spelling. Otherwise this archive registers as MHTML, yields no
+  -- boundary, and its base64 part is never decoded - the phishing form stays
+  -- invisible.
+  test("linear whitespace before a header colon does not hide the boundary", function()
+    local task = get_task()
+    local b64 = tostring(require("rspamd_util").encode_base64(phish_html))
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version : 1.0",
+      'Content-Type : multipart/related; boundary="BOUND1"',
+      "",
+      "--BOUND1",
+      "Content-Type : text/html; charset=utf-8",
+      "Content-Transfer-Encoding : base64",
+      "",
+      b64,
+      "--BOUND1--",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res, 'spaced header names')
+    assert_equal(res.part_count, 1, 'boundary must still be found')
+    assert_true(res.has_password_input, 'base64 part must still be decoded')
+    assert_true(res.has_credential_fields, 'base64 part must still be decoded')
+    task:destroy()
+  end)
+
+  -- A delimiter line is normally recognised by the newline that ends it, so
+  -- the case where the archive simply stops after the delimiter needs its own
+  -- branch. An archive whose closing delimiter is the very last thing in the
+  -- buffer, with no trailing newline, must still terminate the part cleanly.
+  test("a closing delimiter at the very end of the buffer terminates the archive", function()
+    local task = get_task()
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="BOUND1"',
+      "",
+      "--BOUND1",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      phish_html,
+      "--BOUND1--",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res, 'unterminated closing delimiter')
+    assert_equal(res.part_count, 1, 'part must be split at the closing delimiter')
+    assert_true(res.has_password_input, 'unterminated closing delimiter')
+    task:destroy()
+  end)
+
+  -- A part body packed with near-miss delimiter lines makes every one of them
+  -- a candidate for the delimiter check. That check matches in place rather
+  -- than materialising the tail, so this stays linear; what is asserted here
+  -- is the correctness half - none of those lines may split the part.
+  test("many boundary-like lines in a part body do not split it", function()
+    local task = get_task()
+    local noise = string.rep("--BOUND1X padding not a delimiter\r\n", 2000)
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="BOUND1"',
+      "",
+      "--BOUND1",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      noise .. phish_html,
+      "--BOUND1--",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res)
+    assert_equal(res.part_count, 1, 'near-miss delimiters must not split the part')
+    assert_true(res.has_password_input, 'content after near-miss delimiters')
+    task:destroy()
+  end)
+
+  -- A closing delimiter must end after optional transport padding. Treating
+  -- any "--boundary--..." line as closing lets a malformed lookalike cut off
+  -- the remainder of a quoted-printable part before it is decoded.
+  test("invalid closing boundary-like content does not terminate a part", function()
+    local task = get_task()
+    local input = table.concat({
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="REALBOUND"',
+      "",
+      "--REALBOUND",
+      "Content-Type: text/html; charset=utf-8",
+      "Content-Transfer-Encoding: quoted-printable",
+      "",
+      '<html><body><p>before</p>',
+      "--REALBOUND--not-a-delimiter",
+      '<form action=3D"http://phish.example.com/steal">',
+      '<input type=3D"password" name=3D"passwd"></form></body></html>',
+      "--REALBOUND--",
+      "",
+    }, "\r\n")
+    local res = mhtml.process(input, nil, task)
+    assert_not_nil(res)
+    assert_equal(res.part_count, 1,
+        'invalid closing lookalike must remain part content')
+    assert_true(res.has_password_input, 'content after invalid closing lookalike')
+    task:destroy()
+  end)
 end)
