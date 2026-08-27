@@ -76,6 +76,89 @@ local content_modules = {
     extensions = { 'pdf' },
     output = "table"
   },
+  svg = {
+    mime_type = "image/svg+xml",
+    module = require "lua_content/svg",
+    extensions = { 'svg', 'svgz' },
+    output = "table"
+  },
+  html = {
+    mime_type = { "text/html", "application/xhtml+xml" },
+    module = require "lua_content/html",
+    extensions = { 'html', 'htm', 'xhtml' },
+    output = "table"
+  },
+  rtf = {
+    mime_type = { "application/rtf", "text/rtf", "text/richtext" },
+    module = require "lua_content/rtf",
+    extensions = { 'rtf' },
+    output = "table"
+  },
+  hta = {
+    mime_type = "application/hta",
+    module = require "lua_content/hta",
+    extensions = { 'hta' },
+    output = "table"
+  },
+  onenote = {
+    mime_type = "application/onenote",
+    module = require "lua_content/onenote",
+    extensions = { 'one', 'onepkg', 'onetmp', 'onetoc', 'onetoc2' },
+    output = "table"
+  },
+  mhtml = {
+    -- application/x-mimearchive is what lua_magic assigns when the MHT
+    -- content itself is recognised (see lua_magic/types.lua), which is the
+    -- usual case: MUAs attach these as an opaque blob
+    mime_type = { "multipart/related", "message/rfc822",
+                  "application/x-mimearchive" },
+    module = require "lua_content/mhtml",
+    extensions = { 'mhtml', 'mht' },
+    output = "table"
+  },
+  lnk = {
+    mime_type = "application/x-ms-shortcut",
+    module = require "lua_content/lnk",
+    extensions = { 'lnk' },
+    output = "table"
+  },
+  cfbf = {
+    mime_type = {
+      "application/msword",
+      "application/vnd.ms-excel",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.ms-outlook",
+    },
+    module = require "lua_content/cfbf",
+    extensions = { 'doc', 'xls', 'ppt', 'msg' },
+    output = "table"
+  },
+  ooxml = {
+    mime_type = {
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.ms-word.document.macroEnabled.12",
+      "application/vnd.ms-excel.sheet.macroEnabled.12",
+      "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+      "application/vnd.ms-office.vbaProject",
+    },
+    module = require "lua_content/ooxml",
+    extensions = { 'docx', 'docm', 'xlsx', 'xlsm', 'pptx', 'pptm' },
+    output = "table"
+  },
+  chm = {
+    mime_type = { "application/vnd.ms-htmlhelp", "application/x-chm" },
+    module = require "lua_content/chm",
+    extensions = { 'chm' },
+    output = "table"
+  },
+  xml = {
+    mime_type = { "application/xml", "application/xslt+xml", "text/xml" },
+    module = require "lua_content/xml",
+    extensions = { 'xml', 'xsl', 'xslt' },
+    output = "table"
+  },
 }
 
 local modules_by_mime_type
@@ -135,6 +218,13 @@ exports.maybe_process_mime_part = function(part, task)
     if ext then
       pair = modules_by_extension[ext]
     end
+  end
+
+  -- multipart/related is also the normal container for inline HTML with
+  -- embedded resources. Process it as MHTML only when it is an attachment.
+  if pair and pair[1] == 'mhtml' and not part:is_attachment() then
+    lua_util.debugm(N, task, "skip inline multipart/related part %s", mt)
+    return
   end
 
   if pair then
