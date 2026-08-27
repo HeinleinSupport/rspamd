@@ -34,14 +34,21 @@ context("CFBF (OLE2) attachment heuristics", function()
 
   -- Build a minimal CFBF file. Sector 0 is the first directory sector and
   -- sector 1 is its FAT; optional entries are placed in non-contiguous sector 2.
-  local function make_cfbf(entries, extra_tail, chained_entries)
+  --
+  -- sec_shift selects the sector size (9 => 512 bytes / major version 3,
+  -- 12 => 4096 bytes / major version 4). The 512-byte header is padded out to
+  -- a full sector in both cases, which is what makes sector 0 start at one
+  -- whole sector into the file rather than at byte 512.
+  local function make_cfbf(entries, extra_tail, chained_entries, sec_shift)
+    sec_shift = sec_shift or 9
+    local sec_size = math.floor(2 ^ sec_shift)
     local header = {}
     header[1] = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" -- magic, bytes 1-8
     header[2] = string.rep("\0", 20)                -- bytes 9-28 (CLSID + minor/major ver placeholder trimmed below)
     -- Bytes 29-30: BOM (0xFFFE little endian)
     header[3] = "\xFE\xFF"
-    -- Bytes 31-32: sector shift (9 => 512 byte sectors)
-    header[4] = u16le(9)
+    -- Bytes 31-32: sector shift
+    header[4] = u16le(sec_shift)
     -- NumberOfFATSectors = 1 at bytes 45..48
     local used = #table.concat(header)
     header[#header + 1] = string.rep("\0", 45 - 1 - used)
@@ -50,8 +57,8 @@ context("CFBF (OLE2) attachment heuristics", function()
     header[#header + 1] = u32le(0)
     local hdr = table.concat(header) .. string.rep("\0", 76 - #table.concat(header))
     -- Header DIFAT entry: sector 1 is the FAT sector.
-    hdr = hdr .. u32le(1) .. string.rep("\0", 512 - #hdr - 4)
-    assert(#hdr == 512)
+    hdr = hdr .. u32le(1) .. string.rep("\0", sec_size - #hdr - 4)
+    assert(#hdr == sec_size)
 
     local function make_dir_sector(dir_entries)
       local dir = {}
@@ -62,14 +69,14 @@ context("CFBF (OLE2) attachment heuristics", function()
       entry = entry .. string.rep("\0", 128 - #entry)
       dir[#dir + 1] = entry
       end
-      return table.concat(dir) .. string.rep("\0", 512 - #table.concat(dir))
+      return table.concat(dir) .. string.rep("\0", sec_size - #table.concat(dir))
     end
 
     local dirdata = make_dir_sector(entries)
     local fat = u32le(chained_entries and 2 or 0xFFFFFFFE)
         .. u32le(0xFFFFFFFD)
         .. u32le(0xFFFFFFFE)
-        .. string.rep("\xFF", 512 - 12)
+        .. string.rep("\xFF", sec_size - 12)
     local chained_dir = chained_entries and make_dir_sector(chained_entries) or ""
 
     return hdr .. dirdata .. fat .. chained_dir .. (extra_tail or "")
@@ -106,6 +113,23 @@ context("CFBF (OLE2) attachment heuristics", function()
     local res = cfbf.process(input, nil, task)
     assert_not_nil(res)
     assert_true(res.has_vba)
+    task:destroy()
+  end)
+
+  -- MS-CFB pads the 512-byte header out to a full sector, so with 4096-byte
+  -- sectors (major version 4) sector 0 begins at byte 4096, not at 512. Reading
+  -- it at 512 lands in header padding and the directory walk finds nothing.
+  test("parses a major version 4 document with 4096 byte sectors", function()
+    local task = get_task()
+    local input = make_cfbf({
+      { name = "WordDocument", dtype = 2 },
+      { name = "Macros", dtype = 1 },
+      { name = "VBA", dtype = 1 },
+    }, nil, nil, 12)
+    local res = cfbf.process(input, nil, task)
+    assert_not_nil(res, '4096 byte sectors must parse')
+    assert_equal(res.doc_type, 'word', '4096 byte sectors')
+    assert_true(res.has_vba, '4096 byte sectors')
     task:destroy()
   end)
 

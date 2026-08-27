@@ -213,6 +213,20 @@ local function name_doc_type(name)
   return nil
 end
 
+-- Byte offset (1-based, for string indexing) of the start of sector `sec_id`.
+--
+-- MS-CFB 2.2: the header is a 512-byte structure that occupies the *first
+-- sector* of the file, and when the sector size is larger than 512 the header
+-- is padded with zeros to fill it. Sector 0 therefore begins one whole sector
+-- into the file, not at byte 512 - the two only coincide for the 512-byte
+-- sectors of major version 3. Hardcoding 512 puts every read 3584 bytes off on
+-- a major version 4 (4096-byte sector) document, so the directory walk lands in
+-- padding and macro detection silently finds nothing. The sector shift is
+-- validated against CFBF_MIN/MAX_SECTOR_SHIFT before this is ever called.
+local function sector_offset(sec_id, sec_size)
+  return (sec_id + 1) * sec_size + 1
+end
+
 local function get_fat_next(input, fat_sector_ids, entries_per_sector, sector_id)
   if sector_id == CFBF_ENDOFCHAIN or sector_id == CFBF_FREESECT then
     return nil
@@ -226,7 +240,9 @@ local function get_fat_next(input, fat_sector_ids, entries_per_sector, sector_id
   end
 
   local entry_index = sector_id % entries_per_sector
-  local fat_offset = 512 + fat_sector_id * entries_per_sector * 4 + entry_index * 4 + 1
+  -- Four bytes per FAT entry, so entries_per_sector * 4 is the sector size
+  local fat_offset = sector_offset(fat_sector_id, entries_per_sector * 4) +
+      entry_index * 4
 
   return read_u32(input, fat_offset)
 end
@@ -316,7 +332,7 @@ local function process_cfbf(input, mpart, task)
       and not seen_difat_sectors[difat_sec_id]
       and num_difat_sectors > 0 do
     seen_difat_sectors[difat_sec_id] = true
-    local difat_offset = difat_sec_id * sec_size + 512 + 1
+    local difat_offset = sector_offset(difat_sec_id, sec_size)
 
     if difat_offset + sec_size - 1 > buf_len then
       break
@@ -374,7 +390,7 @@ local function process_cfbf(input, mpart, task)
       and dir_sectors_walked < CFBF_MAX_DIR_SECTORS do
     seen_sectors[dir_sec_id] = true
     dir_sectors_walked = dir_sectors_walked + 1
-    local dir_offset = dir_sec_id * sec_size + 512 + 1
+    local dir_offset = sector_offset(dir_sec_id, sec_size)
 
     if dir_offset + sec_size - 1 > buf_len then
       lua_util.debugm(N, task, 'cfbf: directory sector out of bounds')
