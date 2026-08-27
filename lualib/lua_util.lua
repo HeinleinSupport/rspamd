@@ -1345,6 +1345,18 @@ exports.disable_debug_logging = function()
 end
 
 --[[[
+-- @function lua_util.is_debug_enabled(module)
+-- Returns true if debug logging is currently active for `module`.
+-- Lua evaluates call arguments eagerly, so `debugm` cannot save the cost of
+-- building the values passed to it. Guard with this whenever preparing those
+-- values is itself expensive (string concatenation, tostring of a userdata,
+-- table.concat) and the call sits on a hot path.
+--]]
+exports.is_debug_enabled = function(mod)
+  return unconditional_debug or debug_modules[mod] or false
+end
+
+--[[[
 -- @function lua_util.debugm(module, [log_object], format, ...)
 -- Performs fast debug log for a specific module
 --]]

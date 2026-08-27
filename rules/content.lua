@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ]]--
 
+local lua_content = require "lua_content"
+
 local function process_pdf_specific(task, part, specific)
   local suspicious_factor = 0
   if specific.encrypted then
@@ -72,6 +74,20 @@ local function process_specific_cb(task)
       end
     end
   end
+
+  -- A content handler that raised an error never reached set_specific(), so
+  -- the loop above saw nothing for that part and every symbol of that content
+  -- type is missing from this scan. Report it: without a symbol the only
+  -- evidence is one line in the rspamd log, which is indistinguishable from
+  -- routine noise and hides the fact that a detector is dead.
+  local failures = lua_content.get_failures(task)
+
+  if failures then
+    for module_name, err in pairs(failures) do
+      task:insert_result('LUA_CONTENT_ERROR', 1.0,
+          string.format('%s: %s', module_name, err))
+    end
+  end
 end
 
 local id = rspamd_config:register_symbol {
@@ -115,4 +131,15 @@ rspamd_config:register_symbol {
   name = 'PDF_TIMEOUT',
   parent = id,
   groups = { "content", "pdf" },
+}
+
+-- Diagnostic symbol. Score 0: this says nothing about the message, only that
+-- rspamd failed to inspect part of it, so it must never move a verdict.
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'LUA_CONTENT_ERROR',
+  parent = id,
+  score = 0.0,
+  description = 'A lua_content handler raised an error, so the symbols for that content type could not be evaluated',
+  groups = { "content" },
 }
