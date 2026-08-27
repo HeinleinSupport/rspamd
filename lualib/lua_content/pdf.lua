@@ -408,28 +408,35 @@ local function gen_text_grammar()
   end
 
   local function nary_op_handler(...)
+    -- `a b c d e f Tm` replaces the text matrix, so (e, f) is the new line
+    -- origin in absolute page coordinates and d carries the vertical scale that
+    -- the font size of `Tf` is multiplied with.
     local args = { ... }
     local op = args[#args]
+    local operands = args[1]
 
-    if op == 'Tm' then
-      return '\n'
+    if op == 'Tm' and type(operands) == 'table' and
+        type(operands[5]) == 'number' and type(operands[6]) == 'number' then
+      return { '%move%', operands[5], operands[6], true, operands[4] }
     end
 
     return ''
   end
 
   local function ternary_op_handler(...)
-    -- Called for the text positioning operators `tx ty Td` and `tx ty TD`.
-    -- Captures arrive as { tx, ty, op }: a non-zero vertical displacement (ty)
-    -- moves to a new text line, so it must be rendered as a newline. Note that
-    -- the operator name has to be captured explicitly, otherwise it cannot be
-    -- distinguished from the numeric operands.
+    -- Called for the text positioning operators `tx ty Td` and `tx ty TD`,
+    -- which displace the line origin relative to the previous one. Whether that
+    -- displacement starts a new visual line or just continues the current one
+    -- can only be decided by the stateful replay, so pass the offsets on. Note
+    -- that the operator name has to be captured explicitly, otherwise it cannot
+    -- be distinguished from the numeric operands.
     local args = { ... }
     local op = args[#args]
     local ty = args[#args - 1]
+    local tx = args[#args - 2]
 
-    if (op == 'Td' or op == 'TD') and type(ty) == 'number' and ty ~= 0 then
-      return '\n'
+    if (op == 'Td' or op == 'TD') and type(tx) == 'number' and type(ty) == 'number' then
+      return { '%move%', tx, ty, false }
     end
 
     return ''
@@ -444,7 +451,8 @@ local function gen_text_grammar()
   -- them apart from the graphics ternary operators (d/m/l) which are dropped.
   local text_ternary_op = C(P("TD") + P("Td"))
   local graphics_ternary_op = gen_graphics_ternary()
-  local nary_op = P("Tm") + gen_graphics_nary()
+  -- Captured for the same reason as the ternary operators above
+  local nary_op = C(P("Tm") + gen_graphics_nary())
   local text_binary_op = C(P("Tj") + P("TJ") + P("'"))
   local text_quote_op = C(P('"'))
   local font_op = P("Tf")
@@ -468,9 +476,9 @@ local function gen_text_grammar()
     STRING = lpeg.P { gen.str + gen.hexstr },
     TEXT = ((V("TEXT_ARG") * gen.ws ^ 0 * text_binary_op) / text_op_handler) +
         ((V("ARG") / empty * gen.ws ^ 1 * V("ARG") / empty * gen.ws ^ 1 * V("TEXT_ARG") * gen.ws ^ 0 * text_quote_op) / text_op_handler),
-    -- The font name is kept: it selects the encoding for the text that follows
-    FONT = V("FONT_ARG") * gen.ws ^ 1 * (gen.number / empty) * gen.ws ^ 1 * font_op,
-    FONT_ARG = lpeg.Ct(lpeg.Cc("%font%") * gen.id),
+    -- The font name selects the encoding for the text that follows, the size is
+    -- needed to scale the line/word gap thresholds of the replay
+    FONT = lpeg.Ct(lpeg.Cc("%font%") * gen.id * gen.ws ^ 1 * gen.number) * gen.ws ^ 1 * font_op,
     TEXT_ARG = lpeg.Ct(V("STRING")) + V("TEXT_ARRAY"),
     TEXT_ARRAY = "[" * gen.ws ^ 0 * lpeg.Ct((V("TEXT_ARRAY_ELT") * gen.ws ^ 0) ^ 0) * "]",
     TEXT_ARRAY_ELT = gen.number + gen.str + gen.hexstr,
@@ -1602,7 +1610,9 @@ local function search_text(task, pdf, mpart)
                   for _, chunk in ipairs(obj_or_err) do
                     text[#text + 1] = chunk
                   end
-                  text[#text + 1] = '\n'
+                  -- End of this BT/ET text object: the next `Td` offset is
+                  -- again relative to the origin, not to this block's last line
+                  text[#text + 1] = { '%endtext%' }
                   lua_util.debugm(N, task, 'attached %s from content object %s:%s to %s:%s',
                       obj_or_err, tobj.major, tobj.minor, obj.major, obj.minor)
                 else
@@ -1620,6 +1630,52 @@ local function search_text(task, pdf, mpart)
       if #text > 0 then
         local builder = rspamd_pdf_text.builder(1024)
         local use_cmap = false
+        -- Text placement state. Producers emit a positioning operator before
+        -- every styled run, so a run boundary must not be rendered as a line
+        -- break by itself: only a change of the vertical position is one.
+        local font_size, text_scale = 10.0, 1.0
+        local line_x, line_y = 0.0, 0.0
+        local pen_x, cur_y = 0.0, nil
+        -- Whether the current text object has positioned itself yet: a block
+        -- that draws without any Td/Tm sits at the origin of its own matrix,
+        -- which is a real position and not a continuation of the block before
+        local placed = false
+
+        local function effective_size()
+          -- `Tf` sizes of 1 are common, the real scale then sits in the text matrix
+          local sz = font_size * text_scale
+          return sz > 1.0 and sz or 1.0
+        end
+
+        local function place_run(dx, dy, absolute, scale)
+          placed = true
+
+          if scale and scale ~= 0 then
+            text_scale = math.abs(scale)
+          end
+
+          if absolute then
+            line_x, line_y = dx, dy
+          else
+            line_x, line_y = line_x + dx, line_y + dy
+          end
+
+          local sz = effective_size()
+
+          if cur_y then
+            if math.abs(line_y - cur_y) > sz * 0.5 then
+              builder:add_char('\n')
+            elseif line_x - pen_x > sz then
+              -- Same line, but a gap far too wide to be the seam between two
+              -- runs of one word or URL. The threshold is deliberately much
+              -- wider than a space: the pen position below is only estimated,
+              -- and wrongly splitting a URL is worse than merging two words
+              builder:add_char(' ')
+            end
+          end
+
+          cur_y, pen_x = line_y, line_x
+        end
 
         for _, chunk in ipairs(text) do
           local ctype = type(chunk)
@@ -1627,12 +1683,22 @@ local function search_text(task, pdf, mpart)
           if ctype == 'string' then
             -- Structural text produced by an operator, not by a glyph
             builder:add_utf8(chunk)
+            if chunk:find('\n', 1, true) then
+              cur_y = nil
+            end
           elseif ctype == 'userdata' then
             builder:add_utf8(tostring(chunk))
           elseif ctype == 'table' then
             if chunk[1] == '%font%' then
               local font = obj.fonts and obj.fonts[chunk[2]]
               local enc, cmap = font_decoder_of(font, pdf, task)
+              -- A size of 0 is legal and means the scale lives in the text
+              -- matrix alone; keeping the last real size is a better metric
+              local sz = tonumber(chunk[3])
+
+              if sz and sz > 0 then
+                font_size = sz
+              end
 
               if cmap then
                 builder:set_cmap(cmap)
@@ -1641,19 +1707,37 @@ local function search_text(task, pdf, mpart)
                 builder:set_encoding(enc)
                 use_cmap = false
               end
+            elseif chunk[1] == '%move%' then
+              place_run(chunk[2], chunk[3], chunk[4], chunk[5])
+            elseif chunk[1] == '%endtext%' then
+              -- `BT` resets the text matrix to identity, so the next block's
+              -- offsets are relative to the page origin again and the scale
+              -- that a `Tm` put in is gone with it
+              line_x, line_y = 0.0, 0.0
+              text_scale = 1.0
+              placed = false
             elseif chunk[1] == '%text%' then
+              local nchars = 0
+
+              if not placed then
+                place_run(0.0, 0.0, true)
+              end
+
               if chunk[3] then
                 builder:add_char('\n')
+                cur_y = nil
               end
 
               for _, piece in ipairs(chunk[2]) do
                 if piece == false then
                   -- A word gap from a TJ offset, not a character
                   builder:add_char(' ')
+                  nchars = nchars + 1
                 elseif use_cmap then
                   -- A composite font emits multi byte codes, which look like
                   -- UTF-16 to a byte level heuristic; the cmap is authoritative
                   builder:add_encoded(piece)
+                  nchars = nchars + #piece / 2
                 else
                   local decoded, is_utf8 = sanitize_pdf_text(piece)
 
@@ -1663,9 +1747,15 @@ local function search_text(task, pdf, mpart)
                     else
                       builder:add_encoded(decoded)
                     end
+                    nchars = nchars + #decoded
                   end
                 end
               end
+
+              -- No font metrics are available here, so the pen is advanced by
+              -- the average glyph width of a proportional face; that is precise
+              -- enough to tell a column break from a run boundary
+              pen_x = pen_x + nchars * effective_size() * 0.55
             end
           end
         end

@@ -158,6 +158,49 @@ context("PDF content extraction", function()
     assert_not_nil(text:find('A b', 1, true), 'TJ framing, got: ' .. text)
   end)
 
+  test("Styled runs on one line are not split into several lines", function()
+    -- Word and Acrobat draw every formatting change as its own BT/ET object
+    -- with its own Td, all on the same y. Breaking there tears a URL apart and
+    -- invents a host that was never in the document
+    local text = extract(prologue ..
+      'BT /F1 12 Tf 70.86 700.42 Td (https://test) Tj ET\n' ..
+      'BT /F1 12 Tf 129.2 700.42 Td (-) Tj ET\n' ..
+      'BT /F1 12 Tf 133.76 700.42 Td (document.example.com) Tj ET\nQ\n',
+      '/F1 5 0 R')
+
+    assert_not_nil(text:find('https://test-document.example.com', 1, true),
+      'split url, got: ' .. text)
+  end)
+
+  test("A change of the vertical position is a line break", function()
+    local text = extract(prologue ..
+      'BT /F1 12 Tf 70.86 700.42 Td (first) Tj ET\n' ..
+      'BT /F1 12 Tf 70.86 686.42 Td (second) Tj ET\nQ\n',
+      '/F1 5 0 R')
+
+    assert_not_nil(text:find('first\nsecond', 1, true), 'line break, got: ' .. text)
+  end)
+
+  test("A wide horizontal gap on one line is a space", function()
+    -- Two table columns: far too wide to be the seam between two styled runs
+    local text = extract(prologue ..
+      'BT /F1 12 Tf 70.86 700.42 Td (left) Tj ET\n' ..
+      'BT /F1 12 Tf 400.0 700.42 Td (right) Tj ET\nQ\n',
+      '/F1 5 0 R')
+
+    assert_not_nil(text:find('left right', 1, true), 'column gap, got: ' .. text)
+  end)
+
+  test("Tm places a run in absolute page coordinates", function()
+    -- The Tm branch used to be unreachable: the operator name was not captured,
+    -- so the handler could never tell it from the numeric operands
+    local text = extract(prologue ..
+      'BT /F1 12 Tf 1 0 0 1 70.86 700.42 Tm (top) Tj 1 0 0 1 70.86 660.42 Tm (bottom) Tj ET\nQ\n',
+      '/F1 5 0 R')
+
+    assert_not_nil(text:find('top\nbottom', 1, true), 'Tm newline, got: ' .. text)
+  end)
+
   test("Plain ascii text is unaffected", function()
     local text = extract(prologue ..
       'BT /F1 12 Tf (Hello, world) Tj ET\nQ\n', '/F1 5 0 R')
