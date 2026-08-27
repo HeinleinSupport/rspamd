@@ -2977,6 +2977,7 @@ lua_task_inject_part(lua_State *L)
 			part = rspamd_mempool_alloc0(task->task_pool, sizeof(*part));
 			part->part_type = RSPAMD_MIME_PART_TEXT;
 			part->flags |= RSPAMD_MIME_PART_COMPUTED;
+			part->lua_specific.cbref = -1;
 
 			if (original_part) {
 				part->parent_part = original_part;

@@ -70,6 +70,12 @@ struct rspamd_mime_multipart {
 };
 
 enum rspamd_lua_specific_type {
+	/*
+	 * Must stay first so that it is the value a part allocated with
+	 * rspamd_mempool_alloc0 starts out with: zero initialisation then means
+	 * "nothing stored here" rather than "a text part"
+	 */
+	RSPAMD_LUA_PART_UNSET = 0,
 	RSPAMD_LUA_PART_TEXT,
 	RSPAMD_LUA_PART_STRING,
 	RSPAMD_LUA_PART_TABLE,

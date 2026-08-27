@@ -1358,6 +1358,7 @@ rspamd_message_from_data(struct rspamd_task *task, const unsigned char *start,
 	g_assert(start != NULL);
 
 	part = rspamd_mempool_alloc0(task->task_pool, sizeof(*part));
+	part->lua_specific.cbref = -1;
 
 	part->raw_data.begin = start;
 	part->raw_data.len = len;
@@ -1518,7 +1519,15 @@ rspamd_message_dtor(struct rspamd_message *msg)
 			}
 		}
 
-		if (p->lua_specific.cbref != -1) {
+		/*
+		 * Only a ref that luaL_ref actually handed out may be unreffed.
+		 * Registry slot 0 is the free list head, so luaL_ref never returns
+		 * it: > 0 therefore rejects both LUA_REFNIL/LUA_NOREF and the 0 that
+		 * a part allocated with rspamd_mempool_alloc0 starts out with.
+		 * Unreffing 0 would overwrite the free list head and leak every
+		 * registry slot that was waiting on it.
+		 */
+		if (p->lua_specific.cbref > 0) {
 			luaL_unref(msg->task->cfg->lua_state,
 					   LUA_REGISTRYINDEX,
 					   p->lua_specific.cbref);

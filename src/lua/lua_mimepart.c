@@ -2475,7 +2475,8 @@ lua_mimepart_get_specific(lua_State *L)
 		return luaL_error(L, "invalid arguments");
 	}
 
-	if (part->lua_specific.cbref == -1) {
+	if (part->lua_specific.cbref <= 0) {
+		/* Never handed out by luaL_ref: nothing was stored here */
 		lua_pushnil(L);
 	}
 	else {
@@ -2536,7 +2537,7 @@ lua_mimepart_is_specific(lua_State *L)
 		return luaL_error(L, "invalid arguments");
 	}
 
-	lua_pushboolean(L, part->lua_specific.cbref != -1);
+	lua_pushboolean(L, part->lua_specific.cbref > 0);
 
 	return 1;
 }
@@ -2571,7 +2572,7 @@ lua_mimepart_set_specific(lua_State *L)
 	 * union, so storing extracted content never disturbs whatever the part
 	 * already is (an archive keeps its entry list, an image its metadata).
 	 */
-	if (part->lua_specific.cbref != -1) {
+	if (part->lua_specific.cbref > 0) {
 		/* Push old specific data */
 		lua_rawgeti(L, LUA_REGISTRYINDEX, part->lua_specific.cbref);
 		luaL_unref(L, LUA_REGISTRYINDEX, part->lua_specific.cbref);
