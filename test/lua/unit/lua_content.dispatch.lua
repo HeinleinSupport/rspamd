@@ -264,6 +264,145 @@ context("lua_content part dispatch", function()
     task:destroy()
   end)
 
+  -- The anomaly fields are the contract that rules/content.lua consumes: it
+  -- reads them off mime_part:get_specific() and turns them into the ICAL_* and
+  -- VCARD_* symbols. They were computed and thrown away for a while because
+  -- tags_processors had no entry for either tag, so pin the whole path here -
+  -- part reaches the handler, handler sets the fields, fields survive to
+  -- get_specific(). The symbol layer itself is covered functionally in
+  -- 282_content_ical_vcard.robot; these mirror its message files.
+  local function specific_by_tag(task, tag)
+    for _, part in ipairs(task:get_parts()) do
+      local spec = part:get_specific()
+
+      if spec and type(spec) == 'table' and spec.tag == tag then
+        return spec
+      end
+    end
+
+    return nil
+  end
+
+  test("ical anomalies reach get_specific", function()
+    local msg = table.concat({
+      "From: <organiser@example.com>",
+      "To: <attendee@example.com>",
+      "Subject: meeting invite",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/alternative; boundary="BOUND"',
+      "",
+      "--BOUND",
+      "Content-Type: text/plain",
+      "",
+      "You have been invited to a meeting.",
+      "",
+      "--BOUND",
+      'Content-Type: text/calendar; charset="utf-8"; method=REQUEST',
+      "",
+      "BEGIN:VCALENDAR",
+      "METHOD:REPLAY",
+      "BEGIN:VEVENT",
+      "SUMMARY:Urgent",
+      "LOCATION:+1-555-123-4567",
+      "BEGIN:VALARM",
+      "TRIGGER:PT0S",
+      "END:VALARM",
+      "END:VEVENT",
+      "END:VCALENDAR",
+      "",
+      "--BOUND--",
+      "",
+    }, "\r\n")
+
+    local task = scan(msg)
+    local spec = specific_by_tag(task, 'ical')
+
+    assert_not_nil(spec, 'inline text/calendar must reach the ical handler')
+    assert_equal(spec.invalid_prodid, 'missing')
+    assert_equal(spec.invalid_method, 'replay')
+    assert_equal(spec.numeric_location, '+1-555-123-4567')
+    assert_equal(spec.immediate_alarm, 'pt0s')
+    task:destroy()
+  end)
+
+  test("a conforming invite sets no anomaly fields", function()
+    local msg = table.concat({
+      "From: <organiser@example.com>",
+      "To: <attendee@example.com>",
+      "Subject: team meeting",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/alternative; boundary="BOUND"',
+      "",
+      "--BOUND",
+      "Content-Type: text/plain",
+      "",
+      "You have been invited to a meeting.",
+      "",
+      "--BOUND",
+      'Content-Type: text/calendar; charset="utf-8"; method=REQUEST',
+      "",
+      "BEGIN:VCALENDAR",
+      "PRODID:-//Google Inc//Google Calendar 70.9054//EN",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "SUMMARY:Team meeting",
+      "LOCATION:Conference Room A",
+      "BEGIN:VALARM",
+      "TRIGGER:-PT15M",
+      "END:VALARM",
+      "END:VEVENT",
+      "END:VCALENDAR",
+      "",
+      "--BOUND--",
+      "",
+    }, "\r\n")
+
+    local task = scan(msg)
+    local spec = specific_by_tag(task, 'ical')
+
+    assert_not_nil(spec)
+    assert_nil(spec.invalid_prodid)
+    assert_nil(spec.invalid_method)
+    assert_nil(spec.numeric_location)
+    assert_nil(spec.immediate_alarm)
+    task:destroy()
+  end)
+
+  test("vcard anomalies reach get_specific", function()
+    local msg = table.concat({
+      "From: <sender@example.com>",
+      "To: <recipient@example.com>",
+      "Subject: contact card",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="BOUND"',
+      "",
+      "--BOUND",
+      "Content-Type: text/plain",
+      "",
+      "My contact details are attached.",
+      "",
+      "--BOUND",
+      'Content-Type: text/vcard; charset="utf-8"',
+      'Content-Disposition: attachment; filename="contact.vcf"',
+      "",
+      "BEGIN:VCARD",
+      "N:Doe;Jane;;;",
+      "EMAIL:jane@example.com",
+      "END:VCARD",
+      "",
+      "--BOUND--",
+      "",
+    }, "\r\n")
+
+    local task = scan(msg)
+    local spec = specific_by_tag(task, 'vcard')
+
+    assert_not_nil(spec, 'text/vcard must reach the vcard handler')
+    assert_equal(spec.invalid_version, 'missing')
+    assert_true(spec.missing_fn)
+    task:destroy()
+  end)
+
   -- Regression for the actual outage: lua_util.is_debug_enabled() ships with
   -- lua_content, so a deployment that overlays lualib/lua_content/ onto an
   -- installed rspamd without replacing lualib/lua_util.lua used to take every

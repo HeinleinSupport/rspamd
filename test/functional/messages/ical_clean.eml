@@ -1,0 +1,30 @@
+Return-Path: <organiser@example.com>
+To: attendee@example.com
+From: organiser@example.com
+Subject: team meeting
+Message-Id: <20200127090000.ical.clean@example.com>
+Date: Mon, 27 Jan 2020 09:00:00 +0100
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="_ical_bnd_1"
+
+--_ical_bnd_1
+Content-Type: text/plain; charset="utf-8"
+
+You have been invited to a meeting.
+
+--_ical_bnd_1
+Content-Type: text/calendar; charset="utf-8"; method=REQUEST
+
+BEGIN:VCALENDAR
+PRODID:-//Google Inc//Google Calendar 70.9054//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+SUMMARY:Team meeting
+LOCATION:Conference Room A
+BEGIN:VALARM
+TRIGGER:-PT15M
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+
+--_ical_bnd_1--

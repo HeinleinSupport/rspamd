@@ -260,6 +260,61 @@ local function process_xml_specific(task, part, specific)
   end
 end
 
+-- Calendar invites and contact cards arrive inline inside multipart/alternative
+-- far more often than as a named attachment (which is exactly why lua_content
+-- does not gate them on is_attachment()), so a filename is usually absent and a
+-- content-type label is the more useful identifier in the symbol option.
+local function inline_label(part, default_subtype)
+  local fname = part:get_filename()
+
+  if fname then
+    return fname
+  end
+
+  local t, st = part:get_type()
+
+  return string.format('inline:%s/%s', t or 'text', st or default_subtype)
+end
+
+local function process_ical_specific(task, part, specific)
+  local label = inline_label(part, 'calendar')
+
+  if specific.invalid_prodid then
+    task:insert_result('ICAL_INVALID_PRODID', 1.0,
+        string.format('%s:%s', label, specific.invalid_prodid))
+  end
+
+  if specific.invalid_method then
+    task:insert_result('ICAL_INVALID_METHOD', 1.0,
+        string.format('%s:%s', label, specific.invalid_method))
+  end
+
+  if specific.numeric_location then
+    -- Attacker-controlled and only length-bounded by the calendar value, so
+    -- trim it the way ical.lua already trims PRODID before it reaches the log
+    task:insert_result('ICAL_NUMERIC_LOCATION', 1.0,
+        string.format('%s:%s', label, specific.numeric_location:sub(1, 40)))
+  end
+
+  if specific.immediate_alarm then
+    task:insert_result('ICAL_IMMEDIATE_ALARM', 1.0,
+        string.format('%s:%s', label, specific.immediate_alarm))
+  end
+end
+
+local function process_vcard_specific(task, part, specific)
+  local label = inline_label(part, 'vcard')
+
+  if specific.invalid_version then
+    task:insert_result('VCARD_INVALID_VERSION', 1.0,
+        string.format('%s:%s', label, specific.invalid_version))
+  end
+
+  if specific.missing_fn then
+    task:insert_result('VCARD_MISSING_FN', 1.0, label)
+  end
+end
+
 local tags_processors = {
   pdf      = process_pdf_specific,
   rtf      = process_rtf_specific,
@@ -273,6 +328,8 @@ local tags_processors = {
   ooxml    = process_ooxml_specific,
   chm      = process_chm_specific,
   xml      = process_xml_specific,
+  ical     = process_ical_specific,
+  vcard    = process_vcard_specific,
 }
 
 local function process_specific_cb(task)
@@ -712,6 +769,61 @@ rspamd_config:register_symbol {
   score = 3.0,
   description = 'XSLT document() function references a remote HTTP URL (data exfiltration / SSRF)',
   groups = { "content", "xml" },
+}
+
+-- iCal symbols. These are conformance signals on content that is otherwise
+-- perfectly ordinary mail, so the scores stay low deliberately: a legitimate
+-- but sloppy calendar generator must not be able to push a message over on
+-- its own.
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'ICAL_INVALID_PRODID',
+  parent = id,
+  score = 1.0,
+  description = 'iCalendar PRODID is missing or not an RFC 5545 formal public identifier',
+  groups = { "content", "ical" },
+}
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'ICAL_INVALID_METHOD',
+  parent = id,
+  score = 1.0,
+  description = 'iCalendar METHOD is not one of the RFC 5546 values',
+  groups = { "content", "ical" },
+}
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'ICAL_NUMERIC_LOCATION',
+  parent = id,
+  score = 0.5,
+  description = 'iCalendar LOCATION is purely numeric (phone number or numeric room id, not a place)',
+  groups = { "content", "ical" },
+}
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'ICAL_IMMEDIATE_ALARM',
+  parent = id,
+  score = 2.0,
+  description = 'iCalendar VALARM has a zero-duration trigger, forcing an immediate notification popup',
+  groups = { "content", "ical" },
+}
+
+-- vCard symbols
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'VCARD_INVALID_VERSION',
+  parent = id,
+  score = 1.0,
+  description = 'vCard VERSION is missing or not a valid vCard 2.1 / RFC 2426 / RFC 6350 value',
+  groups = { "content", "vcard" },
+}
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'VCARD_MISSING_FN',
+  parent = id,
+  score = 0.5,
+  description = 'vCard has no FN property, which every conforming version requires',
+  groups = { "content", "vcard" },
 }
 
 -- Diagnostic symbol. Score 0: this says nothing about the message, only that

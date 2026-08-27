@@ -1,0 +1,24 @@
+Return-Path: <sender@example.com>
+To: recipient@example.com
+From: sender@example.com
+Subject: contact card
+Message-Id: <20200127090000.vcard.anomalies@example.com>
+Date: Mon, 27 Jan 2020 09:00:00 +0100
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="_vcard_bnd_1"
+
+--_vcard_bnd_1
+Content-Type: text/plain; charset="utf-8"
+
+My contact details are attached.
+
+--_vcard_bnd_1
+Content-Type: text/vcard; charset="utf-8"
+Content-Disposition: attachment; filename="contact.vcf"
+
+BEGIN:VCARD
+N:Doe;Jane;;;
+EMAIL:jane@example.com
+END:VCARD
+
+--_vcard_bnd_1--
