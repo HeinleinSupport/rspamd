@@ -23,6 +23,7 @@ limitations under the License.
 local exports = {}
 local N = "lua_content"
 local lua_util = require "lua_util"
+local lua_content_util = require "lua_content/util"
 local logger = require "rspamd_logger"
 
 -- Task cache key under which handler failures are recorded. rules/content.lua
@@ -55,6 +56,39 @@ end
 --]]
 exports.get_failures = function(task)
   return task:cache_get(failures_key)
+end
+
+-- Recorded when a message exhausts the content handlers' cumulative budget
+-- and some parts are left uninspected; rules/content.lua raises
+-- LUA_CONTENT_BUDGET so the gap is visible in the scan result.
+local budget_key = "lua_content_budget_hit"
+
+--[[[
+-- @function lua_content.note_budget(task, limit)
+-- Records that the cumulative `limit` ('time' or 'bytes') was reached.
+--]]
+exports.note_budget = function(task, limit)
+  if not task:cache_get(budget_key) then
+    task:cache_set(budget_key, limit or 'unknown')
+  end
+end
+
+--[[[
+-- @function lua_content.get_budget_hit(task)
+-- Returns the name of the cumulative limit that stopped processing, or nil.
+--]]
+exports.get_budget_hit = function(task)
+  return task:cache_get(budget_key)
+end
+
+--[[[
+-- @function lua_content.get_limits(task)
+-- Returns { ["module:limit"] = true } for the per-part caps that were reached
+-- while scanning this message, or nil. Re-exported from lua_content/util so
+-- that rules only ever need to require this module.
+--]]
+exports.get_limits = function(task)
+  return lua_content_util.get_limits(task)
 end
 
 local content_modules = {
@@ -228,6 +262,21 @@ exports.maybe_process_mime_part = function(part, task)
   end
 
   if pair then
+    -- Cumulative admission control across every part of this task. The size
+    -- caps inside the handlers bound one attachment; a message with many of
+    -- them used to pay that cost once per part with nothing on top.
+    local content = part:get_content()
+    local within, limit = lua_content_util.budget_check(task, #content, pair[1])
+
+    if not within then
+      lua_util.debugm(N, task,
+          "skip %s part: lua_content %s budget for this message is spent",
+          mt, limit)
+      exports.note_budget(task, limit)
+
+      return
+    end
+
     lua_util.debugm(N, task, "found known content of type %s: %s",
         mt, pair[1])
 
@@ -245,7 +294,16 @@ exports.maybe_process_mime_part = function(part, task)
     -- type then quietly stopped firing, with a single "cannot detect content"
     -- line in the rspamd log as the only evidence. Catching it here keeps the
     -- failure attributable to a module and lets it be reported as a symbol.
-    local ok, data = pcall(pair[2].module.process, part:get_content(), part, task)
+    local ok, data = pcall(pair[2].module.process, content, part, task)
+
+    -- The admission check above only notices an overrun when another
+    -- recognised part follows it. Observing here means a message whose single
+    -- content part was pathological still reports the overrun.
+    local overrun = lua_content_util.budget_observe(task)
+
+    if overrun then
+      exports.note_budget(task, overrun)
+    end
 
     if not ok then
       logger.errx(task, "lua_content handler %s failed on %s: %s",

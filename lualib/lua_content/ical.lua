@@ -145,8 +145,9 @@ local function process_ical(input, mpart, task)
   -- LPeg builds a capture table proportional to the input, so the same
   -- processing cap the attachment handlers use applies here too; without it a
   -- large synthetic file allocates without bound in the Lua heap.
-  input = lua_content_util.to_string(input,
-      lua_content_util.config.max_processing_size)
+  -- limit_for() rather than the shared default: this parser costs per
+  -- property, not per byte scanned, and a real invite is a few kilobytes.
+  input = lua_content_util.bounded_string(input, 'ical', task)
 
   -- One capped URL budget for the whole file. Injecting per property value
   -- without a shared cap lets a crafted file flood every downstream URL
@@ -155,7 +156,23 @@ local function process_ical(input, mpart, task)
   local url_sink = task and
       lua_content_util.make_url_sink(task, mpart, { urls = urls }, 'ical') or nil
   local has_encoded_text = false
+  -- Bytes don't bound a cost charged per property: 4 MB of 5-byte properties
+  -- is 800k Lua tables held alive for the task. Past the cap, the capture
+  -- returns nothing and the result table simply stops growing.
+  local nelts = 0
+  local truncated = false
+  local max_elts = lua_content_util.config.max_elements
   local escaper = l.Ct((gen_grammar() / function(key, value)
+    if nelts >= max_elts then
+      if not truncated then
+        truncated = true
+        lua_content_util.note_limit(task, 'ical', 'elements')
+      end
+
+      return
+    end
+
+    nelts = nelts + 1
     value = value:gsub("\\(.)", control)
     local raw_key = key:lower()
     key = raw_key:match('^([^;]+)')
@@ -245,6 +262,9 @@ local function process_ical(input, mpart, task)
     tag = 'ical',
     extract_text = extract_text_data,
     elts = elts,
+    -- More properties than real software ever emits, not just expensive to
+    -- parse. Scored separately from the diagnostic LUA_CONTENT_LIMIT.
+    excessive_elements = truncated or nil,
     invalid_prodid = invalid_prodid,
     invalid_method = invalid_method,
     numeric_location = numeric_location,

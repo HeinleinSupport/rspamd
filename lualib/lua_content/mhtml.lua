@@ -183,13 +183,16 @@ local function find_boundary(buf, from, delim)
 end
 
 -- Split an archive body on its MIME boundary delimiter.
+-- Returns the parts, and whether the cap cut the archive short. An archive of
+-- exactly MHTML_MAX_PARTS parts is complete: only a part that actually follows
+-- the cap means content went uninspected.
 local function split_parts(buf, boundary)
   local parts = {}
   local delim = '--' .. boundary
   local first = find_boundary(buf, 1, delim)
 
   if not first then
-    return parts
+    return parts, false
   end
 
   local pos = first + #delim
@@ -197,20 +200,22 @@ local function split_parts(buf, boundary)
   while #parts < MHTML_MAX_PARTS do
     -- The closing delimiter is "--boundary--"
     if buf:sub(pos, pos + 1) == '--' then
-      break
+      return parts, false
     end
 
     local nxt = find_boundary(buf, pos, delim)
 
     if not nxt then
-      break
+      return parts, false
     end
 
     parts[#parts + 1] = buf:sub(pos, nxt - 1)
     pos = nxt + #delim
   end
 
-  return parts
+  -- Stopped at the cap: truncated only if another part really follows
+  return parts, buf:sub(pos, pos + 1) ~= '--'
+      and find_boundary(buf, pos, delim) ~= nil
 end
 
 -- Split one inner part into its header block and body.
@@ -410,15 +415,19 @@ local function process_mhtml(input, mpart, task)
   end
 
   if boundary then
-    local buf = lua_content_util.to_string(input,
-        lua_content_util.config.max_processing_size)
-    local parts = split_parts(buf, boundary)
+    local buf = lua_content_util.bounded_string(input, 'mhtml', task)
+    local parts, parts_truncated = split_parts(buf, boundary)
     local budget = MHTML_MAX_DECODED
 
     result.part_count = #parts
 
+    if parts_truncated then
+      lua_content_util.note_limit(task, 'mhtml', 'parts')
+    end
+
     for _, part in ipairs(parts) do
       if budget <= 0 then
+        lua_content_util.note_limit(task, 'mhtml', 'decoded')
         break
       end
 

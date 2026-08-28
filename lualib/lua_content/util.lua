@@ -34,6 +34,7 @@ limitations under the License.
 --]]
 
 local rspamd_url = require "rspamd_url"
+local rspamd_util = require "rspamd_util"
 local rspamd_trie = require "rspamd_trie"
 local bit = require "bit"
 local lua_util = require "lua_util"
@@ -53,6 +54,23 @@ exports.config = {
   -- Upper bound on URLs injected into the task from a single part. Without
   -- it a crafted attachment can flood every URL-consuming module downstream.
   max_urls = 200,
+  -- Upper bound on parsed elements (iCal/vCard properties). Byte limits alone
+  -- don't bound a per-element cost: 4 MB of 5-byte properties is 800k Lua
+  -- tables, kept alive for the task via set_specific(). A real card/invite
+  -- has under a hundred properties, so this is generous by two orders of magnitude.
+  max_elements = 10000,
+  -- Per-format override of max_processing_size: right for a container scanned
+  -- in one trie pass, wrong for a format parsed element by element (see
+  -- max_elements).
+  max_processing_size_by_module = {
+    ical = 256 * 1024,
+    vcard = 256 * 1024,
+  },
+  -- Cumulative budgets for one task, shared by every part of it. The per-part
+  -- limits above bound a single attachment; without these, a message simply
+  -- pays them once per part and the total is unbounded.
+  max_total_time = 0.5,
+  max_total_bytes = 16 * 1024 * 1024,
 }
 
 -- Regexp tries are always compiled binary-safe: `dot_all` so that '.' spans
@@ -167,6 +185,169 @@ end
 
 exports.to_string = to_string
 
+-- Every cap in this module set silently drops data: a truncated prefix, a
+-- capped element list, a URL budget that ran out. Silence is indistinguishable
+-- from "nothing found", so each one is recorded here and rules/content.lua
+-- turns the set into LUA_CONTENT_LIMIT. Keyed by "module:limit" so a message
+-- with many parts of the same type reports once rather than once per part.
+local limits_key = "lua_content_limits"
+
+--[[[
+-- @function util.note_limit(task, module_name, limit)
+-- Records that `module_name` hit `limit` ('size', 'elements', 'urls', ...).
+--]]
+function exports.note_limit(task, module_name, limit)
+  if not task then
+    -- Unit tests drive the handlers without a task
+    return
+  end
+
+  local hits = task:cache_get(limits_key)
+
+  if not hits then
+    hits = {}
+    task:cache_set(limits_key, hits)
+  end
+
+  hits[module_name .. ':' .. limit] = true
+end
+
+--[[[
+-- @function util.get_limits(task)
+-- Returns { ["module:limit"] = true } for the caps that were reached, or nil.
+--]]
+function exports.get_limits(task)
+  return task:cache_get(limits_key)
+end
+
+-- The dispatcher knows a module by its content_modules key, a handler by the
+-- name it passes to bounded_string(); the two differ for exactly one module.
+-- Mapping here keeps that detail out of both.
+local limit_aliases = {
+  vcf = 'vcard',
+}
+
+--[[[
+-- @function util.limit_for(module_name)
+-- The processing size budget for one module: its override if it has one,
+-- otherwise the shared default. A nil name yields the shared default.
+--]]
+function exports.limit_for(module_name)
+  local cfg = exports.config
+  local name = limit_aliases[module_name] or module_name
+
+  return cfg.max_processing_size_by_module[name] or cfg.max_processing_size
+end
+
+--[[[
+-- @function util.bounded_text(input, module_name, task)
+-- The module's size-bounded view of `input`, reporting the truncation.
+-- Prefer this over util.limit() wherever a task is in hand.
+--]]
+function exports.bounded_text(input, module_name, task)
+  local max_len = exports.limit_for(module_name)
+
+  if #input > max_len then
+    exports.note_limit(task, module_name, 'size')
+  end
+
+  return limit_input(input, max_len)
+end
+
+--[[[
+-- @function util.bounded_string(input, module_name, task)
+-- As util.bounded_text, but materialised as a Lua string for the APIs that
+-- cannot consume an rspamd_text.
+--]]
+function exports.bounded_string(input, module_name, task)
+  local max_len = exports.limit_for(module_name)
+
+  if #input > max_len then
+    exports.note_limit(task, module_name, 'size')
+  end
+
+  return to_string(input, max_len)
+end
+
+--[[[
+-- @function util.budget_check(task, nbytes, module_name)
+-- Cumulative per-task admission control. Returns true when a part of
+-- `nbytes` handled by `module_name` may still be processed, or false plus
+-- the limit name ('bytes'/'time'). Per-part limits bound one attachment but
+-- not a whole message: 1 MB calendar attachments in a 48 MB message once
+-- cost 8s of synchronous CPU in one worker before this existed.
+--
+-- Both limits are kept: bytes catch many small parts, time catches one
+-- pathological part - though only once it has run (see budget_observe()).
+-- Timing starts on the first call, not task start, since this is about the
+-- content handlers' own cost.
+--]]
+local budget_key = "lua_content_budget"
+
+function exports.budget_check(task, nbytes, module_name)
+  if not task then
+    -- Unit tests drive the handlers without a task
+    return true
+  end
+
+  local cfg = exports.config
+  -- Charge what the part can actually cost, not its size: no handler reads
+  -- past its own processing limit, and charging iCal/vCard (256 KB each) the
+  -- shared 4 MB default would spend the whole budget on a few parts for nothing.
+  local charge = math.min(nbytes, exports.limit_for(module_name))
+  local st = task:cache_get(budget_key)
+  local first = false
+
+  if not st then
+    -- Created even for a part that is then refused, so a task can't reset its
+    -- clock/byte count by leading with one oversized part
+    st = { started = rspamd_util.get_ticks(), spent = 0 }
+    task:cache_set(budget_key, st)
+    first = true
+  end
+
+  -- Must cover this part too, not just what was already spent, or a task at
+  -- 12 MB could take a 4 MB part under a 16 MB budget and finish at 20 MB.
+  if st.spent + charge > cfg.max_total_bytes then
+    return false, 'bytes'
+  end
+
+  -- The clock starts here, so the first part cannot have overspent it
+  if not first
+      and rspamd_util.get_ticks() - st.started >= cfg.max_total_time then
+    return false, 'time'
+  end
+
+  st.spent = st.spent + charge
+
+  return true
+end
+
+--[[[
+-- @function util.budget_observe(task)
+-- Returns 'time' when this task has already spent its time budget, or nil.
+-- budget_check() only notices an overrun before the *next* part, so a
+-- message with one pathological content part would overshoot silently;
+-- call this after the handler returns to catch that case too.
+--]]
+function exports.budget_observe(task)
+  if not task then
+    return nil
+  end
+
+  local st = task:cache_get(budget_key)
+
+  if not st then
+    return nil
+  end
+
+  if rspamd_util.get_ticks() - st.started >= exports.config.max_total_time then
+    return 'time'
+  end
+
+  return nil
+end
+
 --[[[
 -- @function util.make_url_sink(task, mpart, result, tag)
 -- Returns inject(url) -> boolean: it injects the URL into the task and
@@ -184,8 +365,31 @@ function exports.make_url_sink(task, mpart, result, tag)
   local urls = result.urls
   local n = 0
 
+  -- Queried by extract_urls_into() up front, so a handler that calls the sink
+  -- per property stops paying for a string copy + rspamd_url.all() once the
+  -- cap is spent, instead of only being refused the result afterwards.
+  local reported = false
+
+  local function exhausted()
+    if n < cfg.max_urls then
+      return false
+    end
+
+    if not reported then
+      reported = true
+      exports.note_limit(task, tag, 'urls')
+    end
+
+    return true
+  end
+
   return function(u)
-    if n >= cfg.max_urls then
+    if u == nil then
+      -- Budget probe rather than a URL
+      return not exhausted()
+    end
+
+    if exhausted() then
       return false
     end
 
@@ -208,6 +412,11 @@ end
 -- Finds URLs in a bounded prefix of `input` and feeds them to `sink`.
 --]]
 function exports.extract_urls_into(sink, input, task)
+  -- Ask before working: see make_url_sink()
+  if not sink(nil) then
+    return
+  end
+
   local str = to_string(input, exports.config.max_urls_scan_size)
 
   if #str == 0 then

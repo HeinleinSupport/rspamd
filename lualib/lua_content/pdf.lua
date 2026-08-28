@@ -27,6 +27,7 @@ local rspamd_pdf_text = require "rspamd_pdf_text"
 local bit = require "bit"
 local N = "lua_content"
 local lua_util = require "lua_util"
+local lua_content_util = require "lua_content/util"
 local rspamd_regexp = require "rspamd_regexp"
 local lpeg = require "lpeg"
 local pdf_patterns = {
@@ -1915,6 +1916,7 @@ local function process_pdf(input, mpart, task)
     if pdf_object.start_objects and pdf_object.end_objects then
       if #pdf_object.start_objects > config.max_pdf_objects then
         pdf_output.many_objects = #pdf_object.start_objects
+        lua_content_util.note_limit(task, 'pdf', 'objects')
         -- Trim
       end
 
@@ -1924,6 +1926,13 @@ local function process_pdf(input, mpart, task)
         lua_util.debugm(N, task, "pdf: postprocess_pdf_objects failed: %s", pp_err)
       end
       pdf_output.objects = pdf_object.objects
+
+      if pdf_object.timeout_processing then
+        -- Parsing was cut short, so text and URL extraction never ran over the
+        -- whole document; a clean result here means "not looked at", not "clean"
+        pdf_output.timeout_processing = pdf_object.timeout_processing
+        lua_content_util.note_limit(task, 'pdf', 'time')
+      end
       -- Skip text extraction if timeout occurred - partial results would be incorrect
       if config.text_extraction and not pdf_object.timeout_processing then
         -- Wrap in pcall for safety

@@ -145,8 +145,12 @@ local function find_embedded_files(input)
           types  = scan_embedded_payload(slice),
         }
 
-        if #results >= MAX_EMBEDDED_FILES then
-          break
+        if #results > MAX_EMBEDDED_FILES then
+          -- One past the cap, to tell "exactly at the cap" from "more than
+          -- the cap"; drop it again since payloads past this point go unscanned.
+          results[#results] = nil
+
+          return results, true
         end
       end
     end
@@ -154,7 +158,7 @@ local function find_embedded_files(input)
     pos = found_at + 1
   end
 
-  return results
+  return results, false
 end
 
 local function process_onenote(input, mpart, task)
@@ -183,10 +187,13 @@ local function process_onenote(input, mpart, task)
   -- The GUID walk needs absolute offsets across repeated searches, which is
   -- what plain Lua string semantics give (rspamd_text:find() reports offsets
   -- relative to its `init` argument), so materialise a bounded copy here
-  local buf = lua_content_util.to_string(input,
-      lua_content_util.config.max_processing_size)
+  local buf = lua_content_util.bounded_string(input, 'onenote', task)
 
-  local embedded = find_embedded_files(buf)
+  local embedded, truncated = find_embedded_files(buf)
+
+  if truncated then
+    lua_content_util.note_limit(task, 'onenote', 'embedded_files')
+  end
 
   if #embedded > 0 then
     local debug_on = lua_content_util.debug_enabled()

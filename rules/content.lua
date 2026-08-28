@@ -300,6 +300,10 @@ local function process_ical_specific(task, part, specific)
     task:insert_result('ICAL_IMMEDIATE_ALARM', 1.0,
         string.format('%s:%s', label, specific.immediate_alarm))
   end
+
+  if specific.excessive_elements then
+    task:insert_result('ICAL_EXCESSIVE_PROPERTIES', 1.0, label)
+  end
 end
 
 local function process_vcard_specific(task, part, specific)
@@ -312,6 +316,10 @@ local function process_vcard_specific(task, part, specific)
 
   if specific.missing_fn then
     task:insert_result('VCARD_MISSING_FN', 1.0, label)
+  end
+
+  if specific.excessive_elements then
+    task:insert_result('VCARD_EXCESSIVE_PROPERTIES', 1.0, label)
   end
 end
 
@@ -358,6 +366,24 @@ local function process_specific_cb(task)
     for module_name, err in pairs(failures) do
       task:insert_result('LUA_CONTENT_ERROR', 1.0,
           string.format('%s: %s', module_name, err))
+    end
+  end
+
+  -- Same reasoning as above: parts skipped because the cumulative content
+  -- budget was exhausted produce no symbols otherwise.
+  local budget = lua_content.get_budget_hit(task)
+
+  if budget then
+    task:insert_result('LUA_CONTENT_BUDGET', 1.0, budget)
+  end
+
+  -- Per-part caps: a truncated prefix, a capped element list, a URL budget
+  -- that ran out. Each drops data silently, so report it explicitly.
+  local limits = lua_content.get_limits(task)
+
+  if limits then
+    for hit in pairs(limits) do
+      task:insert_result('LUA_CONTENT_LIMIT', 1.0, hit)
     end
   end
 end
@@ -808,6 +834,18 @@ rspamd_config:register_symbol {
   groups = { "content", "ical" },
 }
 
+-- Not merely expensive to parse: real calendar software emits fewer than a
+-- hundred properties, so hitting the cap is anomalous in its own right.
+-- Scored separately from the diagnostic LUA_CONTENT_LIMIT.
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'ICAL_EXCESSIVE_PROPERTIES',
+  parent = id,
+  score = 3.0,
+  description = 'iCalendar file carries more properties than any real calendar client emits',
+  groups = { "content", "ical" },
+}
+
 -- vCard symbols
 rspamd_config:register_symbol {
   type = 'virtual',
@@ -824,6 +862,38 @@ rspamd_config:register_symbol {
   score = 0.5,
   description = 'vCard has no FN property, which every conforming version requires',
   groups = { "content", "vcard" },
+}
+
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'VCARD_EXCESSIVE_PROPERTIES',
+  parent = id,
+  score = 3.0,
+  description = 'vCard carries more properties than any real contact card holds',
+  groups = { "content", "vcard" },
+}
+
+-- Diagnostic symbol. Score 0: a cap being reached means part of the content
+-- went uninspected, not that the message is spam.
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'LUA_CONTENT_LIMIT',
+  parent = id,
+  score = 0.0,
+  description = 'A lua_content per-part limit was reached, so part of the content was not inspected',
+  groups = { "content" },
+}
+
+-- Diagnostic symbol, score 0 for the same reason as LUA_CONTENT_LIMIT above:
+-- it says nothing about whether the message is spam, only that part of it
+-- went uninspected.
+rspamd_config:register_symbol {
+  type = 'virtual',
+  name = 'LUA_CONTENT_BUDGET',
+  parent = id,
+  score = 0.0,
+  description = 'Message exhausted the cumulative lua_content budget; some parts were not inspected',
+  groups = { "content" },
 }
 
 -- Diagnostic symbol. Score 0: this says nothing about the message, only that

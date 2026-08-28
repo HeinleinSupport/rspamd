@@ -76,11 +76,21 @@ local function process_ooxml(input, mpart, task)
     return nil
   end
 
-  local files = arch:get_files(OOXML_MAX_FILES)
+  -- Ask for one more than the cap: get_files() returns min(actual, requested),
+  -- so asking for exactly the cap can't tell 500 entries from 5000, and
+  -- reporting the latter is the whole point.
+  local files = arch:get_files(OOXML_MAX_FILES + 1)
 
   if not files then
     lua_util.debugm(N, task, 'ooxml: archive returned no file list')
     return nil
+  end
+
+  if #files > OOXML_MAX_FILES then
+    -- Drop the extra entry again; it only proved there was more. Entries past
+    -- the cap are never scanned, so say so rather than report a clean archive.
+    files[#files] = nil
+    lua_content_util.note_limit(task, 'ooxml', 'files')
   end
 
   local result = {

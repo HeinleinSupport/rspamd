@@ -434,6 +434,16 @@ local function process_cfbf(input, mpart, task)
     end
 
     dir_sec_id = next_dir_sec_id
+
+    -- Report only when the cap actually stopped the walk. A chain that is
+    -- exactly CFBF_MAX_DIR_SECTORS long, or that ends/loops here, is complete;
+    -- the test mirrors the loop condition above on purpose.
+    if dir_sectors_walked >= CFBF_MAX_DIR_SECTORS
+        and dir_sec_id ~= CFBF_ENDOFCHAIN and dir_sec_id ~= CFBF_FREESECT
+        and not seen_sectors[dir_sec_id] then
+      -- Entries past this point were never looked at
+      lua_content_util.note_limit(task, 'cfbf', 'dir_sectors')
+    end
   end
 
   -- -----------------------------------------------------------------------
