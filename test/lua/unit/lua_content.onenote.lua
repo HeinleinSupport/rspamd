@@ -85,6 +85,42 @@ context("OneNote attachment heuristics", function()
     task:destroy()
   end)
 
+  -- LUA_CONTENT_LIMIT states that content went uninspected, so a file holding
+  -- exactly as many payloads as the cap allows must not raise it: every one of
+  -- them was scanned.
+  local function file_with_payloads(n)
+    local parts = { ONENOTE_MAGIC }
+
+    for i = 1, n do
+      parts[#parts + 1] = make_fdso(string.format("payload %d", i))
+    end
+
+    return table.concat(parts)
+  end
+
+  test("a file at exactly the embedded-file cap is not reported as truncated", function()
+    local task = get_task()
+    local res = onenote.process(file_with_payloads(64), nil, task)
+
+    assert_not_nil(res)
+    assert_equal(#res.embedded_files, 64, 'all payloads must be found')
+    local hits = require("lua_content").get_limits(task)
+    assert_true(hits == nil or not hits['onenote:embedded_files'],
+        'a fully scanned file must not claim content went uninspected')
+    task:destroy()
+  end)
+
+  test("a file past the embedded-file cap is reported as truncated", function()
+    local task = get_task()
+    local res = onenote.process(file_with_payloads(65), nil, task)
+
+    assert_not_nil(res)
+    assert_equal(#res.embedded_files, 64, 'payloads must stop at the cap')
+    assert_true(require("lua_content").get_limits(task)['onenote:embedded_files'],
+        'a truncated file must be reported')
+    task:destroy()
+  end)
+
   test("extracts URLs from OneNote content", function()
     local task = get_task()
     local input = ONENOTE_MAGIC .. "http://evil.example.com/payload" .. string.rep("\0", 16)

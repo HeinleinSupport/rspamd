@@ -171,4 +171,96 @@ context("CFBF (OLE2) attachment heuristics", function()
     assert_equal(res.doc_type, 'msg')
     task:destroy()
   end)
+  -- The directory walk stops after CFBF_MAX_DIR_SECTORS sectors. A chain of
+  -- exactly that many is complete, so it must not be reported as truncated;
+  -- only a chain that would have continued means storage went unseen.
+  --
+  -- Needs a real multi-sector layout rather than the three-sector one above:
+  -- sectors 0..n-1 hold the directory, the FAT sectors follow, and the header
+  -- DIFAT points at them.
+  local function make_cfbf_chain(nsectors, last_entries)
+    local sec_size = 512
+    local entries_per_fat = sec_size / 4
+    local nfat = 1
+
+    while math.ceil((nsectors + nfat) / entries_per_fat) > nfat do
+      nfat = nfat + 1
+    end
+
+    local hdr = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" .. string.rep("\0", 20)
+        .. "\xFE\xFF" .. u16le(9)
+    hdr = hdr .. string.rep("\0", 44 - #hdr)
+        .. u32le(nfat)   -- NumberOfFATSectors, bytes 45-48
+        .. u32le(0)      -- FirstDirectorySectorID, bytes 49-52
+    hdr = hdr .. string.rep("\0", 76 - #hdr)
+
+    -- Header DIFAT: the FAT sectors sit directly after the directory
+    local difat = {}
+    for i = 0, nfat - 1 do
+      difat[#difat + 1] = u32le(nsectors + i)
+    end
+    hdr = hdr .. table.concat(difat)
+    hdr = hdr .. string.rep("\xFF", sec_size - #hdr)
+    assert(#hdr == sec_size)
+
+    local function dir_sector(dir_entries)
+      local dir = {}
+      for _, e in ipairs(dir_entries or {}) do
+        local entry = name_field(e.name) .. u16le((#e.name + 1) * 2)
+            .. string.char(e.dtype)
+        dir[#dir + 1] = entry .. string.rep("\0", 128 - #entry)
+      end
+      return table.concat(dir) .. string.rep("\0", sec_size - #table.concat(dir))
+    end
+
+    local out = { hdr }
+    out[#out + 1] = dir_sector({ { name = "WordDocument", dtype = 2 } })
+
+    for i = 2, nsectors - 1 do
+      out[#out + 1] = dir_sector(nil)
+    end
+
+    if nsectors > 1 then
+      out[#out + 1] = dir_sector(last_entries)
+    end
+
+    -- FAT: the directory chain runs 0 -> 1 -> ... -> nsectors-1, then ends
+    local fat = {}
+    for i = 0, nsectors - 2 do
+      fat[#fat + 1] = u32le(i + 1)
+    end
+    fat[#fat + 1] = u32le(0xFFFFFFFE)           -- ENDOFCHAIN
+    for _ = 1, nfat do
+      fat[#fat + 1] = u32le(0xFFFFFFFD)         -- FATSECT
+    end
+    local fatstr = table.concat(fat)
+    fatstr = fatstr .. string.rep("\xFF", nfat * sec_size - #fatstr)
+
+    out[#out + 1] = fatstr
+
+    return table.concat(out)
+  end
+
+  test("a directory chain at exactly the sector cap is not reported as truncated", function()
+    local task = get_task()
+    local res = cfbf.process(make_cfbf_chain(1024, { { name = "VBA", dtype = 1 } }), nil, task)
+
+    assert_not_nil(res, '1024 sectors must parse')
+    assert_true(res.has_vba, 'the last sector is still within the cap')
+    local hits = require("lua_content").get_limits(task)
+    assert_true(hits == nil or not hits['cfbf:dir_sectors'],
+        'a fully walked chain must not claim content went unseen')
+    task:destroy()
+  end)
+
+  test("a directory chain past the sector cap is reported as truncated", function()
+    local task = get_task()
+    local res = cfbf.process(make_cfbf_chain(1025, { { name = "VBA", dtype = 1 } }), nil, task)
+
+    assert_not_nil(res, '1025 sectors must parse')
+    assert_false(res.has_vba, 'the sector past the cap must not be walked')
+    assert_true(require("lua_content").get_limits(task)['cfbf:dir_sectors'],
+        'and the gap must be reported')
+    task:destroy()
+  end)
 end)

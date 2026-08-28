@@ -465,6 +465,53 @@ context("MHTML attachment heuristics", function()
     task:destroy()
   end)
 
+  -- LUA_CONTENT_LIMIT states that content went uninspected, so it must not
+  -- fire for an archive that happens to have exactly as many parts as the cap
+  -- allows: that archive was read in full. Only a part beyond the cap counts.
+  local function archive_with_parts(n)
+    local t = {
+      "From: <Saved by Browser>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/related; boundary="B"',
+      "",
+    }
+
+    for i = 1, n do
+      t[#t + 1] = "--B"
+      t[#t + 1] = "Content-Type: text/html; charset=utf-8"
+      t[#t + 1] = ""
+      t[#t + 1] = string.format("<p>part %d</p>", i)
+    end
+
+    t[#t + 1] = "--B--"
+    t[#t + 1] = ""
+
+    return table.concat(t, "\r\n")
+  end
+
+  test("an archive at exactly the part cap is not reported as truncated", function()
+    local task = get_task()
+    local res = mhtml.process(archive_with_parts(32), nil, task)
+
+    assert_not_nil(res)
+    assert_equal(res.part_count, 32, 'all parts must be split')
+    local hits = require("lua_content").get_limits(task)
+    assert_true(hits == nil or not hits['mhtml:parts'],
+        'a complete archive must not claim content went uninspected')
+    task:destroy()
+  end)
+
+  test("an archive past the part cap is reported as truncated", function()
+    local task = get_task()
+    local res = mhtml.process(archive_with_parts(33), nil, task)
+
+    assert_not_nil(res)
+    assert_equal(res.part_count, 32, 'parts must stop at the cap')
+    assert_true(require("lua_content").get_limits(task)['mhtml:parts'],
+        'a truncated archive must be reported')
+    task:destroy()
+  end)
+
   -- The wrapper trie matches `Content-Type\s*:`, so the header lookup that
   -- finds the boundary and the inner Content-Transfer-Encoding has to accept
   -- the same spelling. Otherwise this archive registers as MHTML, yields no
