@@ -38,6 +38,26 @@ local immediate_triggers = lua_util.list_to_hash {
   'pt00s', '-pt00s',
 }
 
+-- Mainstream calendar servers that never adopted the RFC 5545 §3.7.3 FPI
+-- format for PRODID; these are common in legitimate corporate meeting
+-- invites, so their well-known prefixes are exempt from ICAL_INVALID_PRODID.
+local known_nonconforming_prodid_prefixes = {
+  'microsoft exchange server',
+  'microsoft cdo for microsoft exchange',
+  'microsoft cdo for windows 2000',
+  'microsoft outlook',
+}
+
+local function is_known_nonconforming_prodid(prodid)
+  local low = prodid:lower()
+  for _, prefix in ipairs(known_nonconforming_prodid_prefixes) do
+    if low:find(prefix, 1, true) == 1 then
+      return true
+    end
+  end
+  return false
+end
+
 -- NOTE: this module only *extracts* data (returned via part:set_specific()).
 -- It deliberately does NOT call rspamd_config:register_symbol() / task:insert_result()
 -- itself — same convention as pdf.lua/rtf.lua/etc. rspamd's C code only requires
@@ -229,7 +249,8 @@ local function process_ical(input, mpart, task)
   local invalid_prodid = nil
   if not has_prodid then
     invalid_prodid = 'missing'
-  elseif not (prodid:sub(1, 3) == '-//' or prodid:sub(1, 3) == '+//') then
+  elseif not (prodid:sub(1, 3) == '-//' or prodid:sub(1, 3) == '+//')
+      and not is_known_nonconforming_prodid(prodid) then
     invalid_prodid = prodid:sub(1, 40)
   end
 
